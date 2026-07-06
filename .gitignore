@@ -49,5 +49,7 @@ nohup.out
 *.swp
 
 # ---- Claude Code local settings ----
-.claude/settings.local.json
+.claude/
 .node/
+.runtime/
+.venv/
