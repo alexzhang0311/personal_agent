@@ -1,0 +1,116 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mini Vivian WebSocket</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 720px;
+        margin: 40px auto;
+        padding: 0 16px;
+        line-height: 1.6;
+      }
+
+      input {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 8px;
+      }
+
+      button {
+        margin-top: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .message {
+        border-left: 4px solid #999;
+        margin: 8px 0;
+        padding: 8px 12px;
+        background: #f4f4f4;
+      }
+
+      .message strong {
+        display: inline-block;
+        min-width: 90px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Mini Vivian WebSocket</h1>
+    <p>第 4 课：前端和后端通过 WebSocket 双向通信。</p>
+
+    <input id="message" value="hello websocket" />
+    <br />
+    <button id="connect">连接</button>
+    <button id="send">发送</button>
+    <button id="close">关闭</button>
+
+    <h2>消息</h2>
+    <div id="messages">还没有连接</div>
+
+    <script>
+      const messageInput = document.querySelector('#message')
+      const connectButton = document.querySelector('#connect')
+      const sendButton = document.querySelector('#send')
+      const closeButton = document.querySelector('#close')
+      const messagesBox = document.querySelector('#messages')
+      let socket = null
+
+      function addMessage(data) {
+        const item = document.createElement('div')
+        item.className = 'message'
+        item.innerHTML = `<strong>${data.type}</strong> ${data.text}`
+        messagesBox.appendChild(item)
+      }
+
+      function connect() {
+        if (socket) {
+          socket.close()
+        }
+
+        messagesBox.textContent = ''
+        socket = new WebSocket('ws://127.0.0.1:9000/ws/chat')
+
+        socket.onopen = () => {
+          addMessage({ type: 'browser', text: '连接已打开' })
+        }
+
+        socket.onmessage = (event) => {
+          const data = JSON.parse(event.data)
+          addMessage(data)
+        }
+
+        socket.onerror = () => {
+          addMessage({ type: 'error', text: 'WebSocket 连接出错' })
+        }
+
+        socket.onclose = () => {
+          addMessage({ type: 'browser', text: '连接已关闭' })
+          socket = null
+        }
+      }
+
+      function sendMessage() {
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+          addMessage({ type: 'error', text: '请先连接 WebSocket' })
+          return
+        }
+
+        socket.send(messageInput.value)
+      }
+
+      function closeSocket() {
+        if (socket) {
+          socket.close()
+        }
+      }
+
+      connectButton.addEventListener('click', connect)
+      sendButton.addEventListener('click', sendMessage)
+      closeButton.addEventListener('click', closeSocket)
+    </script>
+  </body>
+</html>

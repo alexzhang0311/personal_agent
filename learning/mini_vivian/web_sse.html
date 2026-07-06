@@ -1,0 +1,95 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mini Vivian SSE</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 720px;
+        margin: 40px auto;
+        padding: 0 16px;
+        line-height: 1.6;
+      }
+
+      textarea {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 96px;
+        padding: 8px;
+      }
+
+      button {
+        margin-top: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .event {
+        border-left: 4px solid #999;
+        margin: 8px 0;
+        padding: 8px 12px;
+        background: #f4f4f4;
+      }
+
+      .event strong {
+        display: inline-block;
+        min-width: 80px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Mini Vivian SSE</h1>
+    <p>第 3 课：后端一条一条推送事件，前端实时显示。</p>
+
+    <textarea id="message">帮我分析这个任务</textarea>
+    <br />
+    <button id="start">开始流式任务</button>
+
+    <h2>事件流</h2>
+    <div id="events">还没有开始</div>
+
+    <script>
+      const messageInput = document.querySelector('#message')
+      const startButton = document.querySelector('#start')
+      const eventsBox = document.querySelector('#events')
+      let source = null
+
+      function addEvent(eventData) {
+        const item = document.createElement('div')
+        item.className = 'event'
+        item.innerHTML = `<strong>${eventData.type}</strong> ${eventData.text || eventData.name || ''}`
+        eventsBox.appendChild(item)
+      }
+
+      function startStream() {
+        if (source) {
+          source.close()
+        }
+
+        eventsBox.textContent = ''
+        const message = encodeURIComponent(messageInput.value)
+        source = new EventSource(`http://127.0.0.1:9000/chat/stream?message=${message}`)
+
+        source.onmessage = (event) => {
+          const data = JSON.parse(event.data)
+          addEvent(data)
+
+          if (data.type === 'done') {
+            source.close()
+            source = null
+          }
+        }
+
+        source.onerror = () => {
+          addEvent({ type: 'error', text: '连接断开或后端没有运行' })
+          source.close()
+          source = null
+        }
+      }
+
+      startButton.addEventListener('click', startStream)
+    </script>
+  </body>
+</html>

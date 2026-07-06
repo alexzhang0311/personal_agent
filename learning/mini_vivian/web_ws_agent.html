@@ -1,0 +1,111 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mini Vivian Agent WebSocket</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 720px;
+        margin: 40px auto;
+        padding: 0 16px;
+        line-height: 1.6;
+      }
+
+      input {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 8px;
+      }
+
+      button {
+        margin-top: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .event {
+        border-left: 4px solid #999;
+        margin: 8px 0;
+        padding: 8px 12px;
+        background: #f4f4f4;
+      }
+
+      .event strong {
+        display: inline-block;
+        min-width: 150px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Mini Vivian Agent WebSocket</h1>
+    <p>更像 Vivian 的例子：后端任务运行到一半，主动请求用户确认。</p>
+
+    <input id="message" value="帮我清理临时文件" />
+    <br />
+    <button id="start">启动任务</button>
+    <button id="approve">同意</button>
+    <button id="reject">拒绝</button>
+
+    <h2>任务事件</h2>
+    <div id="events">还没有开始</div>
+
+    <script>
+      const messageInput = document.querySelector('#message')
+      const startButton = document.querySelector('#start')
+      const approveButton = document.querySelector('#approve')
+      const rejectButton = document.querySelector('#reject')
+      const eventsBox = document.querySelector('#events')
+      let socket = null
+
+      function addEvent(data) {
+        const item = document.createElement('div')
+        item.className = 'event'
+        item.innerHTML = `<strong>${data.type}</strong> ${data.text}`
+        eventsBox.appendChild(item)
+      }
+
+      function startTask() {
+        if (socket) {
+          socket.close()
+        }
+
+        eventsBox.textContent = ''
+        socket = new WebSocket('ws://127.0.0.1:9000/ws/agent-task')
+
+        socket.onopen = () => {
+          addEvent({ type: 'browser', text: '连接已打开，发送任务' })
+          socket.send(messageInput.value)
+        }
+
+        socket.onmessage = (event) => {
+          const data = JSON.parse(event.data)
+          addEvent(data)
+        }
+
+        socket.onerror = () => {
+          addEvent({ type: 'error', text: '连接出错' })
+        }
+
+        socket.onclose = () => {
+          addEvent({ type: 'browser', text: '连接已关闭' })
+          socket = null
+        }
+      }
+
+      function sendDecision(decision) {
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+          addEvent({ type: 'error', text: '当前没有可回复的任务' })
+          return
+        }
+
+        socket.send(decision)
+      }
+
+      startButton.addEventListener('click', startTask)
+      approveButton.addEventListener('click', () => sendDecision('approve'))
+      rejectButton.addEventListener('click', () => sendDecision('reject'))
+    </script>
+  </body>
+</html>

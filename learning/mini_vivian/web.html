@@ -1,0 +1,72 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mini Vivian Web</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 720px;
+        margin: 40px auto;
+        padding: 0 16px;
+        line-height: 1.6;
+      }
+
+      textarea {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 96px;
+        padding: 8px;
+      }
+
+      button {
+        margin-top: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      pre {
+        padding: 12px;
+        background: #f4f4f4;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Mini Vivian</h1>
+    <p>第 2 课：前端用 fetch 调用后端 JSON API。</p>
+
+    <textarea id="message">hello</textarea>
+    <br />
+    <button id="send">发送</button>
+
+    <h2>后端返回</h2>
+    <pre id="result">还没有发送</pre>
+
+    <script>
+      const messageInput = document.querySelector('#message')
+      const sendButton = document.querySelector('#send')
+      const resultBox = document.querySelector('#result')
+
+      async function sendMessage() {
+        resultBox.textContent = '请求中...'
+
+        const response = await fetch('http://127.0.0.1:9000/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: messageInput.value,
+          }),
+        })
+
+        const data = await response.json()
+        resultBox.textContent = JSON.stringify(data, null, 2)
+      }
+
+      sendButton.addEventListener('click', sendMessage)
+    </script>
+  </body>
+</html>
