@@ -1,0 +1,83 @@
+# {SUBSYSTEM} 子系统元数据
+# 定义本子系统的基本信息和所有实体
+
+subsystem: "{subsystem}"
+version: "YYYY-MM-DD"
+description: ""
+tier: "T1 | T2 | T3"
+owner: ""
+oncall: ""
+
+# === 实体定义 ===
+# ID 格式: {type}:{subsystem}:{name}
+# type 枚举: app | db | cache | mq | host | service | config | lb | storage | network | platform | sop | script | incident
+
+entities:
+  # --- 业务服务层 ---
+  # - id: "service:{subsystem}:example-service"
+  #   type: "service"
+  #   name: "示例业务服务"
+  #   tier: "T1"
+  #   tags: []
+
+  # --- 应用层 ---
+  # - id: "app:{subsystem}:example-app"
+  #   type: "app"
+  #   name: "示例应用"
+  #   tier: "T1"
+  #   meta:
+  #     port: 8080
+  #     replicas: 1
+  #     # 容量基线
+  #     designed_qps: 0            # 设计容量
+  #     safe_qps: 0                # 安全水位（超过需关注）
+  #     scale_unit: ""             # 扩容单元（如 "1 pod / 2min"）
+  #     bottleneck: ""             # 主要瓶颈组件
+  #     degrade_strategy: ""       # 降级策略
+
+  # --- 数据层 ---
+  # - id: "db:{subsystem}:example-db"
+  #   type: "db"
+  #   name: "示例数据库"
+  #   meta:
+  #     engine: ""
+  #     mode: ""
+  #     # 容量基线
+  #     max_connections: 0         # 最大连接数
+  #     safe_connections: 0        # 安全连接数水位
+  #     storage_ceiling: ""        # 存储上限（如 "500G"）
+  #     scale_unit: ""             # 扩容方式（如 "加从库 / 4h"）
+
+  # --- 缓存/消息队列/基础设施 ---
+  # - id: "cache:{subsystem}:example-cache"
+  #   type: "cache"
+  #   name: "示例缓存"
+
+  # --- 网络层 ---
+  # network 实体用 meta.subtype 细分:
+  #   dns(DNS解析) | firewall(防火墙) | proxy(代理) | tunnel(跨网通道)
+  #   | cert(证书) | mesh(服务网格) | switch(网络设备)
+  # - id: "network:{subsystem}:internal-dns"
+  #   type: "network"
+  #   name: "内网 DNS"
+  #   meta:
+  #     subtype: "dns"
+  #     endpoint: ""
+  #     scope: ""                  # 解析范围
+
+  # - id: "network:{subsystem}:cert-mtls"
+  #   type: "network"
+  #   name: "mTLS 证书"
+  #   meta:
+  #     subtype: "cert"
+  #     cn: ""
+  #     expires_at: "YYYY-MM-DD"
+  #     issuer: ""
+
+  # - id: "network:{subsystem}:out-proxy"
+  #   type: "network"
+  #   name: "出网代理"
+  #   meta:
+  #     subtype: "proxy"
+  #     endpoint: ""
+  #     purpose: ""                # 访问什么外部服务

@@ -1,0 +1,30 @@
+team: 数据库运维室
+ownsComponents: [数据库, TDSQL, Redis, 消息队列]
+
+# Agent 用 when 条件结合变更标题/描述/步骤判定单条等级。
+riskPatterns:
+  - id: db-switchover
+    when: 标题/描述/步骤涉及 主从切换、版本升级、实例迁移、扩缩容、数据迁移、表结构变更(DDL)
+    level: 高
+    reason: 影响核心数据访问与事务一致性，需确认回滚点、数据校验和业务读写降级方案。
+
+  - id: db-xc-transform
+    when: 标题/描述/步骤涉及 信创改造、机型替换、集群迁移或替换、XC改造、TiDB 大版本升级
+    level: 高
+    reason: 信创/机型替换/大版本升级伴随底层平台或硬件更换、集群重建，影响面大、回滚复杂，需确认灰度、并集镜像与回切方案。
+
+  - id: db-config
+    when: 标题/描述/步骤涉及 参数调整、慢查询治理、连接数/连接池配置、备份策略变更
+    level: 中
+    reason: 可能影响数据库性能与连接稳定性，需观察业务侧响应。
+
+  - id: db-routine
+    when: 步骤仅例行巡检、只读查询、监控配置、无写/无结构变更动作
+    level: 低
+    reason: 无数据面变更动作。
+
+crossImpactHints:
+  - with: 业务系统运营室
+    note: 关注 SQL 变更、连接池、数据一致性与发布时序。
+  - with: 主机运维室
+    note: 同窗口关注存储、网络挂载与实例资源争用。

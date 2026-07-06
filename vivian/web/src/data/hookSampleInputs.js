@@ -1,0 +1,15 @@
+export const HOOK_SAMPLE_INPUTS = {
+  Setup: {},
+  SessionStart: { session_id: 'abc-123', source: 'startup' },
+  SessionEnd: { session_id: 'abc-123', reason: 'clear' },
+  UserPromptSubmit: { prompt: 'Hello, help me...' },
+  PreToolUse: { tool_name: 'Bash', tool_input: { command: 'rm -rf /*' } },
+  PermissionRequest: { tool_name: 'Bash', tool_input: { command: 'rm -rf /tmp' } },
+  PostToolUse: { tool_name: 'Write', tool_input: { file_path: 'test.txt' }, tool_output: 'ok' },
+  PostToolUseFailure: { tool_name: 'Bash', tool_input: { command: 'false' }, error: 'exit code 1' },
+  SubagentStart: { agent_type: 'research', agent_id: 'sub-1' },
+  SubagentStop: { agent_type: 'research', agent_id: 'sub-1', result: 'completed' },
+  Stop: { reason: 'user_requested' },
+  Notification: { type: 'task_complete', message: 'Agent finished' },
+  PreCompact: { trigger: 'auto', token_count: 95000 },
+}

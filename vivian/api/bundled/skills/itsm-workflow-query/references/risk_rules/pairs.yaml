@@ -1,0 +1,44 @@
+# 团队组合风险规则。区分两种时序关系：
+#   overlap  —— 两个变更计划时间真实重叠（并发）
+#   adjacent —— 未重叠但间隔 <= bufferMinutes（顺序相邻）
+# Agent 按脚本输出的 pairs[].relation 取对应档位，adjacent 通常比 overlap 低一档。
+
+- teams: [网络运维室, 中间件平台室]
+  overlap:  {level: 高, reason: 网络与中间件同窗口并发，可能同时影响连通性、服务发现与消息链路。}
+  adjacent: {level: 中, reason: 顺序相邻，确认网络变更稳定后再做中间件变更，留足观察窗口。}
+
+- teams: [主机运维室, 数据库运维室]
+  overlap:  {level: 高, reason: 主机与数据库并发，可能同时影响存储、网络、实例资源与数据库可用性。}
+  adjacent: {level: 中, reason: 顺序相邻，确认主机侧稳定后再操作数据库，避免资源争用叠加。}
+
+- teams: [业务系统运营室, 网络运维室]
+  overlap:  {level: 高, reason: 业务发布与网络变更并发，发布、调用链路、接入策略风险叠加。}
+  adjacent: {level: 中, reason: 顺序相邻，确认网络变更回切验证完成后再发布。}
+
+- teams: [业务系统运营室, 数据库运维室]
+  overlap:  {level: 高, reason: 业务发布与数据库变更并发，应用发布、SQL、连接池、数据一致性风险叠加。}
+  adjacent: {level: 中, reason: 顺序相邻，确认数据库变更生效并验证后再发布。}
+
+- teams: [业务系统运营室, 中间件平台室]
+  overlap:  {level: 高, reason: 业务发布与中间件变更并发，消息、缓存、注册发现或网关依赖风险叠加。}
+  adjacent: {level: 中, reason: 顺序相邻，确认中间件稳定后再发布。}
+
+- teams: [业务系统运营室, 主机运维室]
+  overlap:  {level: 中, reason: 业务发布与主机变更并发，部署节点、资源容量与主机可用性需重点确认。}
+  adjacent: {level: 低, reason: 顺序相邻，确认主机就绪后再发布即可。}
+
+- teams: [数据库运维室, 中间件平台室]
+  overlap:  {level: 中, reason: 数据库与中间件并发，数据访问链路、缓存或消息一致性需关注。}
+  adjacent: {level: 低, reason: 顺序相邻，常规留观即可。}
+
+- teams: [主机运维室, 中间件平台室]
+  overlap:  {level: 中, reason: 主机与中间件并发，中间件节点、资源与部署稳定性需关注。}
+  adjacent: {level: 低, reason: 顺序相邻，常规留观即可。}
+
+- teams: [网络运维室, 数据库运维室]
+  overlap:  {level: 高, reason: 网络与数据库同窗口并发，可能同时影响数据库连通性、主从/集群心跳与数据访问。}
+  adjacent: {level: 中, reason: 顺序相邻，确认网络变更回切验证完成后再做数据库操作。}
+
+- teams: [网络运维室, 主机运维室]
+  overlap:  {level: 中, reason: 网络与主机同窗口并发，节点连通性、存储/集群互信与承载实例需重点确认。}
+  adjacent: {level: 低, reason: 顺序相邻，确认网络就绪后再操作主机即可。}

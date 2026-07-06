@@ -1,0 +1,15 @@
+# {SUBSYSTEM} 数据一致性关系 (SyncedWith)
+# A 与 B 之间存在数据同步
+# 推理用途: 数据不一致排查、同步链路故障分析
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "db:{subsystem}:source-db"
+  #   to: "db:{subsystem}:target-db"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     sync_mode: "realtime | scheduled | event-driven"
+  #     sync_tool: ""              # 同步工具（canal/debezium/自研）
+  #     lag_threshold: ""          # 延迟告警阈值
+  #     consistency_check: ""      # 一致性校验方式

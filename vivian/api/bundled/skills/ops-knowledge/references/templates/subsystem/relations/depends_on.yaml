@@ -1,0 +1,16 @@
+# {SUBSYSTEM} 依赖关系 (DependsOn)
+# A 功能依赖 B，B 不可用时 A 受影响
+# 推理用途: RCA 根因分析（反向）、爆炸半径评估（正向）
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "app:{subsystem}:example-app"
+  #   to: "db:{subsystem}:example-db"
+  #   critical: true               # 强依赖: B 挂则 A 不可用
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     protocol: "tcp"
+  #     port: 3306
+  #     timeout_ms: 3000
+  #     fallback: ""               # 降级方案

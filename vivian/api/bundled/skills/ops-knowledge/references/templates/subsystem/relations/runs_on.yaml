@@ -1,0 +1,14 @@
+# {SUBSYSTEM} 部署关系 (RunsOn)
+# A 运行在 B 上（逻辑到物理映射）
+# 推理用途: 基础设施故障时反向查受影响应用
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "app:{subsystem}:example-app"
+  #   to: "host:infra:example-host"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     container_name: ""
+  #     namespace: ""
+  #     replicas: 1

@@ -1,0 +1,36 @@
+team: 业务系统运营室
+ownsComponents: [HBase, Spark]
+
+riskPatterns:
+  - id: biz-core-release
+    when: 标题/描述/步骤涉及 核心交易/支付/账务系统发布、数据库结构或数据迁移、批量/定时任务调整、对外接口变更
+    level: 高
+    reason: 直接影响业务可用性，需确认回滚、降级与发布时序。
+
+  - id: biz-normal-release
+    when: 标题/描述/步骤涉及 普通业务系统发布、配置变更、依赖升级（非核心交易链路）
+    level: 中
+    reason: 影响对应业务功能，需确认验证与回滚。
+
+  - id: biz-bigdata
+    when: 标题/描述/步骤涉及 HBase/Spark/大数据集群 的扩容、降副本、下线节点、环境或版本变更
+    level: 中
+    reason: 大数据组件变更影响离线/实时作业与数据读写，需确认作业重跑与数据完整性。
+
+  - id: biz-llm
+    when: 标题/描述/步骤涉及 dify、大模型服务、知识库、AIAF/数字员工 的发布或扩容
+    level: 中
+    reason: 大模型/AI 服务变更可能影响知识库召回、推理链路与调用方，需关注资源水位与降级方案。
+
+  - id: biz-content
+    when: 步骤仅前端文案、静态资源、配置开关等低风险发布
+    level: 低
+    reason: 影响面小、可快速回滚。
+
+crossImpactHints:
+  - with: 网络运维室
+    note: 发布期间关注接入与调用链路连通性。
+  - with: 数据库运维室
+    note: 关注 SQL、连接池与数据一致性。
+  - with: 中间件平台室
+    note: 关注消息、缓存、注册发现与网关依赖。

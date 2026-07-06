@@ -1,0 +1,56 @@
+# 高危“操作动作”目录。脚本扫描标题/描述/步骤文本，产出中性 operationSignals（不赋等级）。
+# 与 components 正交：components 标“动了什么组件”，operations 标“做了什么动作”。
+# 同一组件下，“巡检”与“主备切换”风险天差地别——靠这里把动作单独标出。
+# Agent 命中后到这里查关键度，并结合变更内容确认是否确有该动作，再决定提级。
+
+- keyword: 主备切换
+  level: 高
+  reason: 主备切换期间存在短时不可用与脑裂风险，需确认切换/回切方案与数据一致性校验。
+- keyword: 主从切换
+  level: 高
+  reason: 主从切换期间读写可用性受影响，需确认切换/回切与连接重连。
+- keyword: 主备回切
+  level: 高
+  reason: 回切同样是一次切换动作，需纳入观察窗口。
+- keyword: 主从回切
+  level: 高
+  reason: 回切同样是一次切换动作，需纳入观察窗口。
+- keyword: 割接
+  level: 高
+  reason: 网络/链路割接通常伴随链路切换或短时中断，需与业务错峰。
+- keyword: 缩容
+  level: 高
+  reason: 集群/节点缩容会下线机器、改变容量，需确认水位、绑定关系与回收观察窗口。
+- keyword: 滚动升级
+  level: 高
+  reason: 滚动升级逐节点重启，期间能力下降，需确认每批观察与回滚。
+- keyword: 信创改造
+  level: 高
+  reason: 信创/架构替换影响面大、回滚复杂，需确认灰度与并集镜像。
+- keyword: 机型替换
+  level: 高
+  reason: 机型替换伴随扩缩容与数据搬迁，需确认数据完整性与回切。
+- keyword: 停机
+  level: 高
+  reason: 停机直接造成服务不可用，需 SOP 与优雅停机、明确恢复步骤。
+- keyword: 数据迁移
+  level: 高
+  reason: 数据迁移需确认一致性、切流与回滚。
+- keyword: 表结构变更
+  level: 高
+  reason: DDL/表结构变更可能锁表或影响下游解析，需确认兼容与回滚。
+- keyword: 大版本升级
+  level: 高
+  reason: 大版本升级兼容性风险高，需确认回滚版本与灰度。
+- keyword: 版本升级
+  level: 中
+  reason: 版本升级需确认兼容性与回滚版本。
+- keyword: 重启
+  level: 中
+  reason: 重启期间实例短时不可用，需确认告警抑制与业务检查。
+- keyword: 扩容
+  level: 中
+  reason: 扩容多为在线操作，但重均衡/再平衡期间可能 IO 抖动。
+
+# 注：灰度发布/全量发布属于“发布阶段”而非高危动作（几乎每条业务发布都有，是降噪对象）。
+# 阶段信息已由 changes[].stepsPhased 与 steps 内容体现，不在此目录重复标注。

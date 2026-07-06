@@ -1,0 +1,18 @@
+# {SUBSYSTEM} 负责人关系 (OwnedBy)
+# A 归属于团队/人员 B
+# 推理用途: 故障升级、变更审批通知
+#
+# 注意: ownership 统一用字符串属性建模。
+# 优先使用 metadata.yaml 中实体的 owner/oncall 字段记录负责人。
+# 本文件仅在需要记录更细粒度的责任划分时使用（如区分开发负责人和运维负责人）。
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "app:{subsystem}:example-app"
+  #   to: "ownership:{subsystem}:ops-team"   # 非图谱实体，仅作标识
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     role: "owner | oncall | dev-owner"
+  #     name: "团队或人员名称"
+  #     contact: "联系方式"

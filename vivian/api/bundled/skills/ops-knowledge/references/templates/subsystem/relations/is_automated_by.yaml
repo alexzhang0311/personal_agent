@@ -1,0 +1,14 @@
+# {SUBSYSTEM} 自动化关系 (IsAutomatedBy)
+# SOP A 可由脚本 B 自动执行
+# 推理用途: 判断 SOP 能否自动执行
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "sop:{subsystem}:example-sop"
+  #   to: "script:{subsystem}:example-script"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     covers_steps: "1,2,3"
+  #     safe_guard: ""
+  #     approval_required: false

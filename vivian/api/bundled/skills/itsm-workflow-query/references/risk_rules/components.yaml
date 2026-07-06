@@ -1,0 +1,98 @@
+# 重要组件目录。脚本只用 keyword 列表扫描标题/描述/步骤文本，产出中性
+# componentSignals（不含等级）。Agent 命中后到这里查关键度与归属科室，并结合
+# 变更内容确认是否确有该组件的变更动作，再决定是否计入风险。
+
+- keyword: WEMQ
+  level: 高
+  owners: [中间件平台室]
+  reason: 关键消息中间件，变更可能影响异步链路、交易解耦和消息堆积。
+
+- keyword: 消息队列
+  level: 高
+  owners: [中间件平台室]
+  reason: 消息队列变更可能影响异步处理、削峰链路和业务一致性。
+
+- keyword: 交换机
+  level: 高
+  owners: [网络运维室]
+  reason: 网络交换机变更可能影响业务系统连通性和跨区访问。
+
+- keyword: 防火墙
+  level: 高
+  owners: [网络运维室]
+  reason: 防火墙策略变更可能影响调用链路、出入口访问和依赖连通性。
+
+- keyword: 路由器
+  level: 高
+  owners: [网络运维室]
+  reason: 路由设备变更可能影响网络路径和业务系统访问。
+
+- keyword: 网络割接
+  level: 高
+  owners: [网络运维室]
+  reason: 网络割接通常伴随链路切换或短时中断，需要与业务变更错峰确认。
+
+- keyword: TDSQL
+  level: 高
+  owners: [数据库运维室]
+  reason: TDSQL 变更可能影响核心数据访问和数据库可用性。
+
+- keyword: 数据库
+  level: 高
+  owners: [数据库运维室]
+  reason: 数据库变更可能影响数据访问、事务一致性和业务可用性。仅当标题/描述/步骤确有数据库变更动作时才计入。
+
+- keyword: Redis
+  level: 中
+  owners: [中间件平台室]
+  reason: Redis 变更可能影响缓存、锁、会话或热点数据访问。
+
+- keyword: Kafka
+  level: 中
+  owners: [中间件平台室]
+  reason: Kafka 变更可能影响消息生产消费和实时链路。
+
+- keyword: TiDB
+  level: 高
+  owners: [数据库运维室]
+  reason: 分布式数据库核心引擎，大版本升级、信创改造、机型替换、主备切换等会影响核心数据访问与可用性。
+
+- keyword: HBase
+  level: 中
+  owners: [业务系统运营室]
+  reason: 大数据列存，扩容、降副本、下线节点等会影响大数据读写与作业稳定性。
+
+- keyword: Spark
+  level: 中
+  owners: [业务系统运营室]
+  reason: 大数据计算引擎，版本或环境变量变更会影响批处理/流处理作业。
+
+- keyword: ceph
+  level: 高
+  owners: [主机运维室]
+  reason: 分布式存储，存储节点扩容/重均衡会影响所有依赖该存储的实例与数据库。
+
+- keyword: 存储节点
+  level: 高
+  owners: [主机运维室]
+  reason: 存储节点扩缩容/重均衡期间 IO 抖动，可能波及上层数据库与业务。
+
+- keyword: Patroni
+  level: 高
+  owners: [数据库运维室]
+  reason: PostgreSQL 高可用组件，patronictl 主备切换影响数据库读写可用性。
+
+- keyword: PostgreSQL
+  level: 高
+  owners: [数据库运维室]
+  reason: 关系型数据库，主备切换/版本变更影响数据访问与一致性。
+
+- keyword: 信创
+  level: 高
+  owners: [数据库运维室, 主机运维室]
+  reason: 信创改造常伴随机型替换、集群迁移与架构替换，影响面大、回滚复杂。
+
+- keyword: XC改造
+  level: 高
+  owners: [业务系统运营室, 数据库运维室]
+  reason: 信创（XC）改造，涉及底层平台/中间件替换，需重点确认兼容性与回滚。

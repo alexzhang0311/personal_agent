@@ -1,0 +1,27 @@
+# {SUBSYSTEM} 监控覆盖关系 (HasMonitoring)
+# A 被监控规则/面板 B 覆盖
+# 推理用途: 排查时确认实体是否有监控、快速定位监控面板
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "app:{subsystem}:example-app"
+  #   to: "monitoring:{subsystem}:example-alert-rule"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     type: "alert | dashboard | log"
+  #     tool: "prometheus | grafana | elk"
+  #     url: ""                    # 面板/规则链接
+  #     metric: ""                 # 监控指标名
+  #     threshold: ""              # 告警阈值
+
+  # --- 容量监控示例 ---
+  # - from: "app:{subsystem}:example-app"
+  #   to: "monitoring:{subsystem}:capacity-dashboard"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     type: "dashboard"
+  #     tool: "grafana"
+  #     url: ""                    # 容量水位面板链接
+  #     metric: "qps, cpu, memory"
+  #     threshold: ""

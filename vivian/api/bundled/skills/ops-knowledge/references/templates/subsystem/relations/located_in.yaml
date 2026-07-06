@@ -1,0 +1,13 @@
+# {SUBSYSTEM} 位置关系 (LocatedIn)
+# A 位于 B（物理/逻辑位置）
+# 推理用途: 关联故障分析（同机架/同机房）
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "host:{subsystem}:example-host"
+  #   to: "location:infra:rack-01"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     dc: ""
+  #     zone: ""

@@ -1,0 +1,13 @@
+# {SUBSYSTEM} 配置关系 (ConfiguredWith)
+# A 使用配置 B
+# 推理用途: 配置漂移检测、变更影响分析
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "app:{subsystem}:example-app"
+  #   to: "config:{subsystem}:example-config"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     config_center: ""          # 配置中心地址
+  #     key_params: []             # 关键参数名

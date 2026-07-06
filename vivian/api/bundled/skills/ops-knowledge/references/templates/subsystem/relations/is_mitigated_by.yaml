@@ -1,0 +1,19 @@
+# {SUBSYSTEM} SOP 缓解关系 (IsMitigatedBy)
+# 实体/风险/故障 A 被 SOP B 缓解
+# 推理用途: 告警→SOP 自动匹配
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "db:{subsystem}:example-db"
+  #   to: "sop:{subsystem}:example-sop"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     trigger: ""                # 触发条件（用于告警匹配）
+
+  # --- Incident → SOP（故障用了哪个 SOP 处理）---
+  # - from: "incident:{subsystem}:YYYYMMDD-001"
+  #   to: "sop:{subsystem}:example-sop"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     effective: true            # SOP 是否有效解决了问题

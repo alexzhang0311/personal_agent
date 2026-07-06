@@ -1,0 +1,18 @@
+# skill-creator Python 依赖
+# =============================
+# 所有脚本仅依赖 Python 标准库 + PyYAML
+# 需要 Python >= 3.10（使用了 type hint 语法 str | None）
+
+PyYAML>=6.0
+
+# =============================
+# 标准库依赖（无需安装，仅供参考）：
+# argparse, base64, concurrent.futures, datetime, fnmatch
+# functools, hashlib, html, http.server, json, math
+# mimetypes, os, pathlib, random, re, select, signal
+# subprocess, sys, tempfile, threading, time, uuid
+# webbrowser, zipfile
+# =============================
+# 外部工具依赖（非 Python 包）：
+# claude CLI (claude -p) - 用于 run_eval.py / improve_description.py / run_loop.py
+#   仅在 Claude Code 环境中使用描述优化功能时需要

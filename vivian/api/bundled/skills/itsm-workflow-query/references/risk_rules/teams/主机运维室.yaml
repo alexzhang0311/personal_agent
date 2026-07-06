@@ -1,0 +1,24 @@
+team: 主机运维室
+ownsComponents: [ceph, 存储节点]
+
+riskPatterns:
+  - id: host-storage
+    when: 标题/描述/步骤涉及 ceph/存储节点扩缩容、osd 增删、存储重均衡、POD 架构存储变更、pod 常态化重启
+    level: 中
+    reason: 分布式存储扩缩容与 pod 重启会引起 IO 抖动与节点漂移，可能波及上层数据库与业务实例，需与 DB/业务错峰。
+
+  - id: host-core
+    when: 标题/描述/步骤涉及 核心主机重启、扩缩容、存储或网络挂载调整、宿主机维护、内核/驱动升级
+    level: 中
+    reason: 影响承载实例的可用性与资源容量，需确认上层业务/数据库的迁移或降级。
+
+  - id: host-routine
+    when: 步骤仅监控、巡检、补丁预检、只读采集等
+    level: 低
+    reason: 不影响实例运行。
+
+crossImpactHints:
+  - with: 数据库运维室
+    note: 同窗口关注存储、网络与实例资源争用。
+  - with: 中间件平台室
+    note: 关注中间件节点所在宿主机的稳定性。

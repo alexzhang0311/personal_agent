@@ -1,0 +1,24 @@
+team: 网络运维室
+ownsComponents: [交换机, 防火墙, 路由器, 网络割接]
+
+riskPatterns:
+  - id: net-cutover
+    when: 标题/描述/步骤涉及 割接、链路切换、核心交换/路由变更、防火墙策略变更、骨干或出入口调整
+    level: 高
+    reason: 可能造成短时中断或连通性变化，需与业务/中间件错峰并确认回切方案。
+
+  - id: net-policy-minor
+    when: 标题/描述/步骤涉及 非核心设备策略调整、单条 ACL/端口放通、监控或日志配置
+    level: 中
+    reason: 影响面有限，但仍需确认目标链路与依赖。
+
+  - id: net-routine
+    when: 步骤仅巡检、只读采集、非核心设备只读操作
+    level: 低
+    reason: 不影响转发面。
+
+crossImpactHints:
+  - with: 业务系统运营室
+    note: 关注接入策略与调用链路连通性，发布期间尤甚。
+  - with: 中间件平台室
+    note: 关注服务发现、消息链路与接入层连通性。

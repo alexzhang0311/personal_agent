@@ -1,0 +1,16 @@
+# {SUBSYSTEM} 功能点清单
+# 描述本子系统提供的核心功能和能力
+
+subsystem: "{subsystem}"
+version: "YYYY-MM-DD"
+
+functions:
+  # - id: "func-001"
+  #   name: "功能名称"
+  #   description: "功能描述"
+  #   entry_point: "入口（API 路径/页面/消息主题）"
+  #   depends_on_entities:          # 该功能依赖的实体 ID
+  #     - "app:{subsystem}:xxx"
+  #     - "db:{subsystem}:xxx"
+  #   criticality: "core | important | normal"
+  #   notes: ""

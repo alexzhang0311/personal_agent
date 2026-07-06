@@ -1,0 +1,56 @@
+import {
+  Package,
+  FileText,
+  Sheet,
+  FileType,
+  Presentation,
+  FolderSearch,
+  BookOpen,
+  Network,
+  Wand2,
+  BookMarked,
+  File,
+  Code,
+  Database,
+  Settings,
+  Wrench,
+  Zap,
+  Globe,
+  MessageSquare,
+  Shield,
+  Terminal,
+  Server,
+  PencilRuler,
+  GitBranch,
+} from 'lucide-react'
+
+const ICON_MAP = {
+  Package,
+  FileText,
+  Sheet,
+  FileType,
+  Presentation,
+  FolderSearch,
+  BookOpen,
+  Network,
+  Wand2,
+  BookMarked,
+  File,
+  Code,
+  Database,
+  Settings,
+  Wrench,
+  Zap,
+  Globe,
+  MessageSquare,
+  Shield,
+  Terminal,
+  Server,
+  PencilRuler,
+  GitBranch,
+}
+
+export default function LucideIcon({ name, ...props }) {
+  const Icon = (name && ICON_MAP[name]) || Package
+  return <Icon {...props} />
+}

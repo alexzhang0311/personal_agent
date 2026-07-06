@@ -1,0 +1,49 @@
+# ============================================
+# 文档处理技能包 - Python 依赖汇总（离线部署版）
+# ============================================
+# Python 依赖均为 pip 可安装，无需 poppler-utils 等系统 PDF 工具
+# 系统依赖：jq
+
+# ---- PDF 读取与处理 ----
+pypdf>=4.0.0              # PDF 基础操作：读取、合并、拆分、旋转、加密、表单
+pdfplumber>=0.10.0         # PDF 文本和表格提取（布局感知）
+reportlab>=4.0.0           # PDF 创建（Canvas / Platypus）
+PyMuPDF>=1.24.0            # PDF 全能工具：替代整套 poppler-utils
+
+# ---- Excel / 电子表格 ----
+openpyxl>=3.1.0            # .xlsx/.xlsm 读写、格式化、公式
+pandas>=2.0.0              # 数据分析、CSV/TSV/Excel 读写
+xlrd>=2.0.0                # 旧版 .xls 文件读取
+odfpy>=1.4.0               # .ods (OpenDocument) 文件读取
+formulas>=1.2.0            # 纯 Python Excel 公式求值引擎（替代 LibreOffice 重算）
+
+# ---- Word 文档 ----
+python-docx>=1.1.0         # .docx 读取（替代 pandoc）
+# docx-js 通过 npm 安装：npm install -g docx（创建新文档）
+
+# ---- PowerPoint ----
+python-pptx>=0.6.23        # .pptx 读取和分析
+markitdown[pptx]>=0.1.0    # PPT 文本提取
+Pillow>=10.0.0             # 图片处理、缩略图生成
+
+# ---- 电子书 / 其他格式 ----
+ebooklib>=0.18             # .epub 读取（替代 pandoc）
+beautifulsoup4>=4.12.0     # HTML 内容解析（配合 ebooklib）
+lxml>=5.0.0                # XML/HTML 解析器后端
+defusedxml>=0.7.1          # Office XML 安全解析
+
+# ---- MCP 技能 ----
+mcp>=1.8.0                  # MCP server scaffold / validator examples
+
+# ---- Node.js 依赖（npm 离线安装，见 pack.sh NPM_PACKAGES）----
+# npm install -g docx pptxgenjs pdf-lib pdfjs-dist react react-dom react-icons sharp @anthropic-ai/claude-code
+
+# ============================================
+# 已移除的依赖（及原因）
+# ============================================
+# pytesseract    — OCR 不需要
+# pdf2image      — PDF 转图脚本已改用 PyMuPDF
+# poppler-utils  — 由 PyMuPDF (fitz) 替代
+# pandoc         — 由 python-docx + ebooklib 替代
+# libreoffice    — 公式重算由 formulas 替代；不支持旧版 .doc/.ppt
+# qpdf / pdftk   — 由 pypdf 替代

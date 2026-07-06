@@ -1,0 +1,24 @@
+team: 中间件平台室
+ownsComponents: [WEMQ, 消息队列, Redis, Kafka]
+
+riskPatterns:
+  - id: mq-core
+    when: 标题/描述/步骤涉及 WEMQ/Kafka/消息队列 的扩缩容、版本升级、迁移、主从或分区调整
+    level: 高
+    reason: 影响异步链路与消息堆积，可能波及交易解耦与下游消费。
+
+  - id: cache-core
+    when: 标题/描述/步骤涉及 Redis 主从切换、集群拓扑变更、大 key 治理、持久化策略调整
+    level: 中
+    reason: 影响缓存、分布式锁、会话与热点数据访问。
+
+  - id: mw-routine
+    when: 步骤仅监控、巡检、只读配置查看
+    level: 低
+    reason: 不影响运行实例。
+
+crossImpactHints:
+  - with: 业务系统运营室
+    note: 关注消息、缓存、注册发现与网关依赖。
+  - with: 网络运维室
+    note: 同窗口关注消息链路与服务发现连通性。

@@ -1,0 +1,30 @@
+{
+  "skill_name": "rota-schedule",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "帮我查一下 BDAP 系统的 AB 角和发布窗口时间",
+      "expected_output": "返回 BDAP 相关系统的 AB 角（first_principal, second_principal）和发布窗口（schedule_start, schedule_end）信息"
+    },
+    {
+      "id": 2,
+      "prompt": "我想看看 jacklzliu 负责哪些系统，他是 A 角还是 B 角",
+      "expected_output": "返回 jacklzliu 作为 A 角或 B 角负责的所有系统列表及其发布窗口信息"
+    },
+    {
+      "id": 3,
+      "prompt": "把 BDP-CHANGE 系统的发布窗口改成 10:00 到 18:00",
+      "expected_output": "成功更新 BDP-CHANGE 系统的 schedule_start 为 10:00，schedule_end 为 18:00"
+    },
+    {
+      "id": 4,
+      "prompt": "查一下陈浒洋负责的子系统有哪些",
+      "expected_output": "返回陈浒洋（或 huyangchen）作为 A 角或 B 角负责的子系统列表"
+    },
+    {
+      "id": 5,
+      "prompt": "帮我列出所有大数据域的系统和对应的值班人员",
+      "expected_output": "返回大数据域（domain=大数据域）的所有系统及其 AB 角和发布窗口信息"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+# {SUBSYSTEM} 变更记录关系 (WasChangedBy)
+# A 被变更 B 修改过
+# 推理用途: 变更回溯分析
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "app:{subsystem}:example-app"
+  #   to: "change:{subsystem}:chg-YYYYMMDD"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     change_time: ""
+  #     change_desc: ""
+  #     rollback_plan: ""
+
+  # --- Incident → Change（故障由哪个变更引发）---
+  # - from: "incident:{subsystem}:YYYYMMDD-001"
+  #   to: "change:{subsystem}:chg-YYYYMMDD"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     change_time: ""
+  #     change_desc: ""

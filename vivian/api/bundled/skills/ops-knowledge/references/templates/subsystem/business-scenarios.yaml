@@ -1,0 +1,20 @@
+# {SUBSYSTEM} 业务场景
+# 描述本子系统承载的核心业务场景和用户旅程
+
+subsystem: "{subsystem}"
+version: "YYYY-MM-DD"
+
+scenarios:
+  # - id: "scenario-001"
+  #   name: "场景名称"
+  #   description: "用户视角的场景描述"
+  #   trigger: "触发条件（用户操作/定时任务/外部事件）"
+  #   flow:                          # 调用链路
+  #     - "app:{subsystem}:gateway"
+  #     - "app:{subsystem}:core-service"
+  #     - "db:{subsystem}:master"
+  #   sla: "99.99%"
+  #   peak_qps: 0
+  #   peak_concurrency: 0         # 峰值并发数
+  #   business_impact: "场景不可用时的业务影响描述"
+  #   related_functions: ["func-001"]

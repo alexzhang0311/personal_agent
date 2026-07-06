@@ -1,0 +1,54 @@
+# 风险规则集入口：路由配置 + 策略 + 整体定级指引。
+# 脚本 build_change_timeline.py 只读取这里的策略字段产出“事实”，不做定级。
+# 风险等级由 Agent 依据本目录规则集判定（见 SKILL.md 的“变更风险分析”）。
+
+bufferMinutes: 60
+
+defaultTeams:
+  - 业务系统运营室
+  - 网络运维室
+  - 数据库运维室
+  - 中间件平台室
+  - 主机运维室
+
+envPolicy:
+  productionTokens:
+    - 生产环境
+    - 云生产环境
+  nonProductionTokens:
+    - 准生产
+    - 测试
+    - UAT
+    - uat
+    - 开发
+    - 灰度
+  # 默认仅把 production/cloud-production 计入主分析；mixed/non-production/unknown
+  # 进 excluded 段并附原因，不静默丢弃。
+  mainAnalysisEnvClasses:
+    - production
+    - cloud-production
+
+statusPolicy:
+  closedTokens:
+    - 已关闭
+    - 已取消
+    - 已撤销
+    - 已驳回
+    - 已完成
+    - 关闭
+    - 取消
+    - 撤销
+    - 驳回
+    - 完成
+
+# 整体定级指引：给 Agent 综合判断用，不是代码 if/else。
+overallLevelGuidance: |
+  高: 高危团队组合的真实时间重叠(overlap)；或高危组件经标题/描述/步骤确认确有变更动作；
+      或 peakConcurrency 较高且涉及跨科室强依赖。
+  中: 仅缓冲相邻(adjacent，未重叠)的高危组合；或中危组件命中；或并发偏多但依赖较弱。
+  低: 无重叠且无缓冲相邻；或涉及变更均为例行、只读、低影响（如例行巡检、文案发布）。
+
+notes: |
+  组件信号(componentSignals)是中性候选，只扫标题/描述/步骤文本，不扫团队名。
+  命中信号不等于高风险——例如“例行巡检”虽来自数据库运维室也应判低。
+  务必结合各科室 teams/<科室>.yaml 的 when 条件确认是否确有风险动作。

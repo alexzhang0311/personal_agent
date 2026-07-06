@@ -1,0 +1,975 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Chat input placeholder ── */
+.chat-textarea::placeholder {
+  color: var(--text-dim);
+  opacity: 0.6;
+}
+
+/* ── Font Face ── */
+@font-face {
+  font-family: 'Noto Sans';
+  src: url('/fonts/NotoSans-Variable.woff2') format('woff2');
+  font-weight: 300 700;
+  font-display: swap;
+}
+
+/* JetBrains Mono — UI monospace (code blocks, mono labels). Small, no Nerd icons. */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Light.woff2') format('woff2');
+  font-weight: 300;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+
+/* JetBrainsMono Nerd Font Mono — terminal only. Adds Powerline / dev icons. */
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font Mono';
+  src: url('/fonts/JetBrainsMonoNerdFontMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font Mono';
+  src: url('/fonts/JetBrainsMonoNerdFontMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+
+/* Source Han Mono SC — CJK fallback. unicode-range gates the download:
+   the browser only fetches these files when a glyph in this range is rendered. */
+@font-face {
+  font-family: 'Source Han Mono SC';
+  src: url('/fonts/SourceHanMonoSC-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+  unicode-range:
+    U+2000-206F, U+2E80-2EFF, U+2F00-2FDF, U+3000-303F,
+    U+3040-309F, U+30A0-30FF, U+3105-312F, U+3130-318F,
+    U+31A0-31BF, U+31F0-31FF, U+3200-32FF, U+3300-33FF,
+    U+3400-4DBF, U+4E00-9FFF, U+A000-A4CF, U+AC00-D7AF,
+    U+F900-FAFF, U+FE30-FE4F, U+FE50-FE6F, U+FF00-FFEF;
+}
+@font-face {
+  font-family: 'Source Han Mono SC';
+  src: url('/fonts/SourceHanMonoSC-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+  unicode-range:
+    U+2000-206F, U+2E80-2EFF, U+2F00-2FDF, U+3000-303F,
+    U+3040-309F, U+30A0-30FF, U+3105-312F, U+3130-318F,
+    U+31A0-31BF, U+31F0-31FF, U+3200-32FF, U+3300-33FF,
+    U+3400-4DBF, U+4E00-9FFF, U+A000-A4CF, U+AC00-D7AF,
+    U+F900-FAFF, U+FE30-FE4F, U+FE50-FE6F, U+FF00-FFEF;
+}
+
+/* ── CSS Variables ── */
+:root {
+  --bg-base: #0d1117;
+  --bg-surface: #161b22;
+  --bg-elevated: #21262d;
+  --bg-overlay: #0d1117e6;
+
+  --border-subtle: #21262d;
+  --border: #30363d;
+  --border-strong: #484f58;
+
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-dim: #6e7681;
+  --text-inverse: #0d1117;
+
+  --blue: #58a6ff;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --red: #f85149;
+  --purple: #bc8cff;
+  --cyan: #79c0ff;
+  --orange: #ffa657;
+
+  --syntax-comment: #8b949e;
+  --syntax-keyword: #ff7b72;
+  --syntax-string: #a5d6ff;
+  --syntax-number: #79c0ff;
+  --syntax-title: #d2a8ff;
+  --syntax-variable: #ffa657;
+  --syntax-attribute: #79c0ff;
+  --syntax-built-in: #ffa657;
+  --syntax-meta: #7ee787;
+  --syntax-tag: #7ee787;
+  --syntax-subst: #e6edf3;
+
+  --status-running: var(--purple);
+  --status-success: var(--green);
+  --status-error: var(--red);
+  --status-pending: var(--yellow);
+  --status-idle: var(--border);
+
+  --scrollbar-thumb: var(--border);
+  --scrollbar-thumb-hover: var(--border-strong);
+
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.06em;
+
+  --duration-fast: 100ms;
+  --duration-normal: 150ms;
+  --duration-slow: 200ms;
+  --ease-default: ease;
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --navbar-height: 56px;
+  --sidebar-width: 240px;
+  --canvas-width: 380px;
+
+  --font-weight-base: 450;
+  --font-weight-light: 300;
+}
+
+/* ── Light Theme ── */
+[data-theme="light"] {
+  --bg-base:       #f8f9fb;
+  --bg-surface:    #ffffff;
+  --bg-elevated:   #f0f2f5;
+  --bg-overlay:    #ffffffd9;
+
+  --border-subtle: #dfe3e8;
+  --border:        #c9cfd6;
+  --border-strong: #8b95a2;
+
+  --text-primary:   #1b1f24;
+  --text-secondary: #545d68;
+  --text-dim:       #8b95a2;
+  --text-inverse:   #ffffff;
+
+  --blue:   #0969da;
+  --green:  #1a7f37;
+  --yellow: #9a6700;
+  --red:    #cf222e;
+  --purple: #8250df;
+  --cyan:   #0550ae;
+  --orange: #bc4c00;
+
+  --syntax-comment: #6e7781;
+  --syntax-keyword: #cf222e;
+  --syntax-string: #0a3069;
+  --syntax-number: #0550ae;
+  --syntax-title: #8250df;
+  --syntax-variable: #953800;
+  --syntax-attribute: #0550ae;
+  --syntax-built-in: #953800;
+  --syntax-meta: #116329;
+  --syntax-tag: #116329;
+  --syntax-subst: #1b1f24;
+
+  --scrollbar-thumb: #c9cfd6;
+  --scrollbar-thumb-hover: #8b95a2;
+
+  --font-weight-base: 500;
+  --font-weight-light: 400;
+}
+
+/* ── Global Reset ── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  max-width: 100vw;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: 'Noto Sans', 'JetBrains Mono', 'Source Han Mono SC', sans-serif;
+  font-size: 14px;
+  font-weight: var(--font-weight-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: auto;
+  scroll-behavior: smooth;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+.overflow-y-auto,
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Scrollable but chromeless — for tab rows that overflow on narrow panels */
+.scrollbar-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+.overflow-y-auto {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html,
+  body,
+  .overflow-y-auto,
+  .overflow-x-auto {
+    scroll-behavior: auto;
+  }
+}
+
+/* ── Status Left Border ── */
+.status-bar {
+  border-left: 2px solid var(--status-idle);
+  padding-left: 12px;
+}
+.status-bar.running { border-left-color: var(--status-running); }
+.status-bar.success { border-left-color: var(--status-success); }
+.status-bar.error { border-left-color: var(--status-error); }
+.status-bar.pending { border-left-color: var(--status-pending); }
+
+/* ── Chat Message Slide-In ── */
+@keyframes chat-message-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+.chat-message-in {
+  animation: chat-message-in 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+}
+
+/* Empty-state ChatInput: let the outer wrapper control width */
+.chat-empty-input > .flex-shrink-0 {
+  padding-left: 0;
+  padding-right: 0;
+}
+.chat-empty-input > .flex-shrink-0 > div:first-child {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+/* ── Skeleton Shimmer ── */
+@keyframes skill-drawer-left-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+@keyframes skill-drawer-right-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+.skill-drawer-left {
+  animation: skill-drawer-left-in 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+  transform-origin: left center;
+}
+.skill-drawer-right {
+  animation: skill-drawer-right-in 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+  transform-origin: right center;
+}
+
+@keyframes skill-picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.skill-picker-popup {
+  animation: skill-picker-in 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+  transform-origin: bottom center;
+}
+
+@keyframes prompt-expand-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes prompt-expand-modal-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+.prompt-expand-backdrop {
+  animation: prompt-expand-backdrop-in 200ms var(--ease-spring) both;
+}
+.prompt-expand-modal {
+  animation: prompt-expand-modal-in 200ms var(--ease-spring) both;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated) 25%,
+    var(--bg-surface) 50%,
+    var(--bg-elevated) 75%
+  );
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+/* ── Copy Button ── */
+.copyable { position: relative; }
+.copy-btn {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.copyable:hover .copy-btn,
+.copyable-block:hover .copy-btn {
+  opacity: 1;
+}
+
+/* ── Chip ── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+  opacity: 0.85;
+}
+
+/* ── Spinner ── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.icon-running {
+  animation: spin 1s linear infinite;
+}
+
+.thinking-block[open] .thinking-chevron {
+  transform: rotate(90deg);
+}
+.thinking-block summary::-webkit-details-marker { display: none; }
+
+/* Quiet focus treatment for dense accordion toggles. */
+.quiet-toggle:focus {
+  outline: none;
+}
+.quiet-toggle:focus-visible {
+  outline: 1px solid var(--border-strong);
+  outline-offset: -1px;
+}
+
+/* ── Thinking shimmer (from old project) ── */
+@keyframes thinking-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.thinking-shimmer {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 500;
+  background: linear-gradient(
+    90deg,
+    var(--text-dim) 0%,
+    var(--text-dim) 30%,
+    var(--text-primary) 45%,
+    var(--text-primary) 55%,
+    var(--text-dim) 70%,
+    var(--text-dim) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: thinking-shimmer 3s infinite linear;
+}
+
+/* ── Pulse border for canvas ── */
+@keyframes pulse-border {
+  0%, 100% { border-left-color: var(--purple); }
+  50% { border-left-color: transparent; }
+}
+
+/* ── Success snap (from old project) ── */
+@keyframes success-snap {
+  0% { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
+
+/* ── Highlight.js Override ── */
+.hljs {
+  background: var(--bg-elevated) !important;
+  color: var(--text-primary) !important;
+  padding: 0 !important;
+}
+.hljs-comment,
+.hljs-quote {
+  color: var(--syntax-comment) !important;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-type {
+  color: var(--syntax-keyword) !important;
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--syntax-string) !important;
+}
+.hljs-number,
+.hljs-literal {
+  color: var(--syntax-number) !important;
+}
+.hljs-title,
+.hljs-section,
+.hljs-function .hljs-title {
+  color: var(--syntax-title) !important;
+}
+.hljs-variable,
+.hljs-template-variable,
+.hljs-deletion {
+  color: var(--syntax-variable) !important;
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--syntax-attribute) !important;
+}
+.hljs-built_in,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--syntax-built-in) !important;
+}
+.hljs-meta,
+.hljs-doctag {
+  color: var(--syntax-meta) !important;
+}
+.hljs-tag,
+.hljs-name {
+  color: var(--syntax-tag) !important;
+}
+.hljs-strong {
+  color: var(--text-primary) !important;
+  font-weight: 700 !important;
+}
+.hljs-emphasis {
+  color: var(--text-primary) !important;
+  font-style: italic;
+}
+.hljs-code,
+.hljs-link {
+  color: var(--syntax-attribute) !important;
+}
+.hljs-subst,
+.hljs-punctuation,
+.hljs-operator {
+  color: var(--syntax-subst) !important;
+}
+
+/* ── Mermaid Override ──
+   Mermaid (theme:'base') injects an ID-scoped <style> (#<renderId>) with ID
+   specificity. Every rule below must be `!important` to win, and every
+   selector scoped to `.mermaid-svg` so it never reaches other SVG/graph
+   components (LifecycleGraph etc.). Values are `var(--*)` only so diagrams
+   re-theme live on theme toggle with no re-render. Removing the
+   `!important`s silently reverts to Mermaid's hardcoded base palette. */
+
+/* Global */
+.mermaid-svg * {
+  filter: none !important;
+}
+.mermaid-svg text,
+.mermaid-svg .nodeLabel,
+.mermaid-svg .edgeLabel,
+.mermaid-svg .label {
+  fill: var(--text-primary) !important;
+  color: var(--text-primary) !important;
+  font-family: 'Noto Sans', 'Source Han Sans SC', sans-serif !important;
+}
+
+/* Flowchart */
+.mermaid-svg .node rect,
+.mermaid-svg .node polygon,
+.mermaid-svg .node circle,
+.mermaid-svg .node ellipse,
+.mermaid-svg .node path {
+  fill: var(--bg-surface) !important;
+  stroke: var(--border-strong) !important;
+  stroke-width: 1.2px !important;
+}
+.mermaid-svg .node rect {
+  rx: 4px !important;
+  ry: 4px !important;
+}
+.mermaid-svg .cluster rect {
+  fill: var(--bg-surface) !important;
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .edgePath .path,
+.mermaid-svg .flowchart-link {
+  stroke: var(--blue) !important;
+  stroke-opacity: 0.85 !important;
+  stroke-width: 1.2px !important;
+}
+/* Exact selectors Mermaid's classDiagram/flowchart getStyles uses for the
+   yellow `mainBkg` label background. Background fill is split from text
+   colour so SVG-mode (<text>) label glyphs stay visible. */
+.mermaid-svg .edgeLabel .label rect,
+.mermaid-svg .edgeLabel > rect {
+  fill: var(--bg-surface) !important;
+  opacity: 1 !important;
+}
+.mermaid-svg .edgeLabel,
+.mermaid-svg .edgeLabel .label span,
+.mermaid-svg .edgeLabel foreignObject div,
+.mermaid-svg .labelBkg {
+  background: var(--bg-surface) !important;
+  background-color: var(--bg-surface) !important;
+  color: var(--text-primary) !important;
+  opacity: 1 !important;
+}
+.mermaid-svg .arrowheadPath,
+.mermaid-svg marker path,
+.mermaid-svg .marker {
+  fill: var(--blue) !important;
+  stroke: var(--blue) !important;
+}
+
+/* Sequence */
+.mermaid-svg .actor {
+  fill: var(--bg-elevated) !important;
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg text.actor {
+  fill: var(--text-primary) !important;
+}
+.mermaid-svg .messageLine0,
+.mermaid-svg .messageLine1 {
+  stroke: var(--cyan) !important;
+}
+.mermaid-svg .messageText {
+  fill: var(--text-primary) !important;
+}
+.mermaid-svg .note {
+  fill: var(--bg-surface) !important;
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .state-note rect,
+.mermaid-svg .note-cluster rect,
+.mermaid-svg .note-cluster path,
+.mermaid-svg .label-container.outer-path path {
+  fill: var(--bg-surface) !important;
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .noteText,
+.mermaid-svg .noteText tspan,
+.mermaid-svg .noteLabel,
+.mermaid-svg .noteLabel span,
+.mermaid-svg .noteLabel foreignObject div {
+  fill: var(--text-primary) !important;
+  color: var(--text-primary) !important;
+}
+.mermaid-svg .activation0,
+.mermaid-svg .activation1,
+.mermaid-svg .activation2 {
+  fill: var(--bg-elevated) !important;
+  stroke: var(--blue) !important;
+}
+.mermaid-svg .loopLine {
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .loopText,
+.mermaid-svg .loopText tspan {
+  fill: var(--text-secondary) !important;
+}
+
+/* State diagram v2 */
+.mermaid-svg .statediagram-state rect,
+.mermaid-svg .statediagram-state .node rect {
+  fill: var(--bg-surface) !important;
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .statediagram-cluster rect {
+  fill: var(--bg-surface) !important;
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .transition {
+  stroke: var(--blue) !important;
+}
+
+/* Class diagram (the off-brand pale-yellow base fallback lives here) */
+.mermaid-svg .classGroup rect,
+.mermaid-svg g.classGroup rect,
+.mermaid-svg .class rect,
+.mermaid-svg .node .label-container,
+.mermaid-svg rect.divider {
+  fill: var(--bg-surface) !important;
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .classGroup text,
+.mermaid-svg .classGroup .title,
+.mermaid-svg .classTitle,
+.mermaid-svg .classLabel .label {
+  fill: var(--text-primary) !important;
+  color: var(--text-primary) !important;
+}
+.mermaid-svg .classGroup .title,
+.mermaid-svg .classTitle {
+  fill: var(--blue) !important;
+  color: var(--blue) !important;
+  font-weight: 600 !important;
+}
+.mermaid-svg .classGroup line,
+.mermaid-svg .classGroup .divider {
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .relation {
+  stroke: var(--cyan) !important;
+  fill: none !important;
+  stroke-width: 1.2px !important;
+}
+.mermaid-svg .relationshipLabelBox,
+.mermaid-svg .classLabel .box,
+.mermaid-svg .cardinality rect {
+  fill: var(--bg-surface) !important;
+  stroke: none !important;
+  opacity: 1 !important;
+}
+.mermaid-svg .relationshipLabel,
+.mermaid-svg .cardinality text {
+  fill: var(--cyan) !important;
+}
+
+/* ER / data model */
+.mermaid-svg .entityBox,
+.mermaid-svg .attributeBoxOdd,
+.mermaid-svg .attributeBoxEven {
+  fill: var(--bg-surface) !important;
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .entityLabel,
+.mermaid-svg .attributeBoxOdd text,
+.mermaid-svg .attributeBoxEven text,
+.mermaid-svg .relationshipLabel {
+  fill: var(--text-primary) !important;
+  color: var(--text-primary) !important;
+}
+.mermaid-svg .relationshipLine {
+  stroke: var(--cyan) !important;
+  stroke-width: 1.2px !important;
+}
+
+/* Axes, legends, and chart-like diagrams */
+.mermaid-svg .grid path,
+.mermaid-svg .grid line,
+.mermaid-svg .axis path,
+.mermaid-svg .axis line,
+.mermaid-svg .tick line,
+.mermaid-svg .plot,
+.mermaid-svg .quadrant-line,
+.mermaid-svg .quadrant-point {
+  stroke: var(--border-subtle) !important;
+}
+.mermaid-svg .tick text,
+.mermaid-svg .legend,
+.mermaid-svg .legend text,
+.mermaid-svg .pieTitleText,
+.mermaid-svg .slice text,
+.mermaid-svg .chart-title,
+.mermaid-svg .x-axis-label,
+.mermaid-svg .y-axis-label,
+.mermaid-svg .quadrant-label,
+.mermaid-svg .quadrant-title {
+  fill: var(--text-primary) !important;
+  color: var(--text-primary) !important;
+}
+.mermaid-svg .pieOuterCircle,
+.mermaid-svg .legend rect {
+  stroke: var(--border-strong) !important;
+}
+
+/* Gantt, timeline, and user journey */
+.mermaid-svg rect.section,
+.mermaid-svg .section rect,
+.mermaid-svg .taskWrapper .node-bkg,
+.mermaid-svg .eventWrapper .node-bkg,
+.mermaid-svg rect.task,
+.mermaid-svg .journey-section,
+.mermaid-svg rect.task[class*="task-type-"] {
+  fill: var(--bg-surface) !important;
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .sectionTitle,
+.mermaid-svg .taskText,
+.mermaid-svg .taskTextOutsideRight,
+.mermaid-svg .taskTextOutsideLeft,
+.mermaid-svg .taskTextLight,
+.mermaid-svg text.task,
+.mermaid-svg .timeline-node text,
+.mermaid-svg .eventWrapper text,
+.mermaid-svg .taskWrapper text {
+  fill: var(--text-primary) !important;
+  color: var(--text-primary) !important;
+}
+.mermaid-svg .today,
+.mermaid-svg .exclude-range {
+  stroke: var(--yellow) !important;
+}
+.mermaid-svg .task-line,
+.mermaid-svg .lineWrapper line,
+.mermaid-svg .journey-line {
+  stroke: var(--cyan) !important;
+}
+.mermaid-svg .face {
+  fill: var(--bg-surface) !important;
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .mouth,
+.mermaid-svg .actor-0,
+.mermaid-svg .actor-1,
+.mermaid-svg .actor-2,
+.mermaid-svg .actor-3,
+.mermaid-svg .actor-4 {
+  stroke: var(--text-secondary) !important;
+  fill: var(--text-secondary) !important;
+}
+
+/* Git, requirement, mindmap, and other newer Mermaid families */
+.mermaid-svg .commit-bulb,
+.mermaid-svg .commit-label-bkg,
+.mermaid-svg .branch-label-bkg,
+.mermaid-svg .requirement,
+.mermaid-svg .requirementBox,
+.mermaid-svg .requirementLabelBox,
+.mermaid-svg .mindmap-node rect,
+.mermaid-svg .mindmap-node circle,
+.mermaid-svg .mindmap-node polygon,
+.mermaid-svg .kanban-item rect,
+.mermaid-svg .packet rect,
+.mermaid-svg .radar-chart-serie,
+.mermaid-svg .treemap-node rect,
+.mermaid-svg .architecture-node rect {
+  fill: var(--bg-surface) !important;
+  stroke: var(--border-strong) !important;
+}
+.mermaid-svg .commit-label,
+.mermaid-svg .branch-label,
+.mermaid-svg .gitTitleText,
+.mermaid-svg .requirementTitle,
+.mermaid-svg .requirementText,
+.mermaid-svg .mindmap-node text,
+.mermaid-svg .kanban-item text,
+.mermaid-svg .packet text,
+.mermaid-svg .radar-axis-label,
+.mermaid-svg .treemap-node text,
+.mermaid-svg .architecture-node text {
+  fill: var(--text-primary) !important;
+  color: var(--text-primary) !important;
+}
+.mermaid-svg .commit-arrows,
+.mermaid-svg .branch,
+.mermaid-svg .requirement-line,
+.mermaid-svg .mindmap-edge,
+.mermaid-svg .architecture-edge,
+.mermaid-svg .radar-axis,
+.mermaid-svg .radar-grid {
+  stroke: var(--cyan) !important;
+}
+
+/* ── Markdown Body ── */
+.markdown-body {
+  overflow-x: hidden;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  color: var(--text-primary);
+}
+.markdown-body pre {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.markdown-body > *:first-child { margin-top: 0; }
+.markdown-body > *:last-child { margin-bottom: 0; }
+
+/* Compact markdown when mirrored inside the Canvas Inspector tree. */
+.canvas-inspector-message .markdown-body {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+.canvas-inspector-message .markdown-body h1,
+.canvas-inspector-message .markdown-body h2,
+.canvas-inspector-message .markdown-body h3 {
+  margin: 4px 0 2px !important;
+  padding-bottom: 0 !important;
+  border-bottom: none !important;
+  font-size: var(--text-sm) !important;
+  line-height: 1.45 !important;
+}
+.canvas-inspector-message .markdown-body p,
+.canvas-inspector-message .markdown-body ul,
+.canvas-inspector-message .markdown-body ol,
+.canvas-inspector-message .markdown-body blockquote,
+.canvas-inspector-message .markdown-body table {
+  margin: 0 0 2px !important;
+}
+.canvas-inspector-message .markdown-body p,
+.canvas-inspector-message .markdown-body li {
+  font-size: var(--text-xs) !important;
+  line-height: 1.45 !important;
+}
+.canvas-inspector-message .markdown-body li {
+  margin-bottom: 1px !important;
+}
+.canvas-inspector-message .markdown-body pre,
+.canvas-inspector-message .copyable-block > div {
+  margin-bottom: 2px !important;
+}
+
+/* ── Content visibility optimization ── */
+.content-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
+
+/* ── MarqueeText ── */
+.marquee-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.marquee-text.overflow span {
+  display: inline-block;
+  animation: marquee-scroll 4s linear infinite alternate;
+  animation-delay: 1s;
+}
+@keyframes marquee-scroll {
+  0%, 20% { transform: translateX(0); }
+  80%, 100% { transform: translateX(var(--shift)); }
+}
+
+/* ── Font weight override for light mode ── */
+[data-theme="light"] .font-light {
+  font-weight: 400;
+}
+
+/* ── Selection ── */
+::selection {
+  background: var(--blue);
+  color: var(--text-inverse);
+}
+
+/* ── Recharts Overrides ── */
+.recharts-cartesian-grid line {
+  stroke: var(--border-subtle);
+}
+.recharts-text {
+  fill: var(--text-dim);
+  font-family: 'JetBrains Mono', 'Source Han Mono SC', monospace;
+  font-size: 11px;
+}
+
+/* ── Tree indent for expanded tool sections ── */
+.tool-tree {
+  position: relative;
+  margin-left: 2px;
+  padding-left: 10px;
+}
+.tool-tree-child {
+  position: relative;
+  padding-left: 0;
+  margin-top: 4px;
+}
+.tool-tree-child::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 14px;
+  width: 8px;
+  height: 1px;
+  background: var(--border);
+}
+.tool-tree-child::after {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: -4px;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+.tool-tree-child:first-child::after {
+  top: 0;
+}
+.tool-tree-child:last-child::after {
+  bottom: auto;
+  height: 18px;
+}
+.tool-tree-child:first-child:last-child::after {
+  top: 0;
+  height: 14px;
+}

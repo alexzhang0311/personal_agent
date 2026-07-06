@@ -1,0 +1,12 @@
+# {SUBSYSTEM} 业务支撑关系 (Supports)
+# A 支撑业务服务 B
+# 推理用途: 故障定级（通过 Tier 判断优先级）
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "app:{subsystem}:example-app"
+  #   to: "service:{subsystem}:example-service"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     sla: "99.99%"

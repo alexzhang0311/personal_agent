@@ -1,0 +1,52 @@
+# ---- macOS ----
+.DS_Store
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# ---- Node / Web (vivian/web) ----
+node_modules/
+vivian/web/dist/
+vivian/web/nohup.out
+npm-debug.log*
+yarn-error.log*
+
+# ---- Build artifacts / packaged releases ----
+dist/*.tar.gz
+
+# ---- Runtime data ----
+# Agent gateway runtime queues, locks and auth token (machine-local, may hold secrets)
+.prod-agent-gateway/
+
+# Application logs
+vivian/logs/
+
+# Process id files
+*.pid
+vivian/bin/*.pid
+
+# Generic log / temp output
+*.log
+nohup.out
+
+# ---- Editor / local ----
+.idea/
+*.swp
+
+# ---- Claude Code local settings ----
+.claude/settings.local.json

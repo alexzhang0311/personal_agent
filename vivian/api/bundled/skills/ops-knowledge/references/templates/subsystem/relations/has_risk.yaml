@@ -1,0 +1,14 @@
+# {SUBSYSTEM} 风险关系 (HasRisk)
+# A 存在已识别风险 B
+# 推理用途: 风险盘点、变更前风险评估
+
+subsystem: "{subsystem}"
+
+relations:
+  # - from: "app:{subsystem}:example-app"
+  #   to: "risk:{subsystem}:example-risk"
+  #   confidence: confirmed        # confirmed(已确认) | inferred(推断) | uncertain(存疑)
+  #   meta:
+  #     risk_level: "high | medium | low"
+  #     status: "open | mitigated | accepted"
+  #     description: ""
