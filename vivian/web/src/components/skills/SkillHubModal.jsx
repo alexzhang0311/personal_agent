@@ -7,12 +7,14 @@ import useUiStore from '../../stores/uiStore'
 import HubFileTree from './HubFileTree'
 import HubFileViewer from './HubFileViewer'
 import LucideIcon from './LucideIcon'
+import SkillSubmissionReview from './SkillSubmissionReview'
 
 export default function SkillHubModal() {
   const { t } = useTranslation()
   const open = useSkillHubStore((s) => s.open)
   const closeHub = useSkillHubStore((s) => s.closeHub)
   const selectedSkill = useSkillHubStore((s) => s.selectedSkill)
+  const hubView = useSkillHubStore((s) => s.hubView)
 
   useEffect(() => {
     if (!open) return
@@ -48,7 +50,7 @@ export default function SkillHubModal() {
           animation: 'modal-scale-in 200ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
-        {selectedSkill ? <DetailView /> : <GridView />}
+        {hubView === 'review' ? <SkillSubmissionReview /> : selectedSkill ? <DetailView /> : <GridView />}
       </div>
 
       <style>{`
@@ -73,9 +75,16 @@ function GridView() {
   const uploading = useSkillHubStore((s) => s.uploading)
   const authUser = useAuthStore((s) => s.user)
   const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
+  const pendingSubmissions = useSkillHubStore((s) => s.pendingSubmissions)
+  const fetchPendingSubmissions = useSkillHubStore((s) => s.fetchPendingSubmissions)
+  const setHubView = useSkillHubStore((s) => s.setHubView)
 
   const isAdmin = authUser?.role === 'admin'
   const fileInputRef = useRef(null)
+
+  useEffect(() => {
+    if (isAdmin) fetchPendingSubmissions().catch(() => {})
+  }, [isAdmin, fetchPendingSubmissions])
 
   const filteredSkills = useMemo(() => {
     if (!searchQuery) return skills
@@ -117,6 +126,15 @@ function GridView() {
         <span className="font-bold" style={{ color: 'var(--text-primary)', fontSize: 16 }}>
           {t('skillHub.title')}
         </span>
+        {isAdmin && (
+          <button
+            className="px-2 py-1 uppercase"
+            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em' }}
+            onClick={() => setHubView('review')}
+          >
+            {t('skillHub.pendingReview')} {pendingSubmissions.length}
+          </button>
+        )}
         <div className="flex-1" />
 
         {/* Search */}
@@ -300,6 +318,9 @@ function SkillCard({ skill, onSelect }) {
         {skill.description || ''}
       </span>
       <div className="flex items-center gap-2" style={{ marginTop: 'auto' }}>
+        <span className="truncate" style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+          {t('skillHub.publisher', { name: skill.publisher && skill.publisher !== 'system' ? skill.publisher : t('skillHub.systemPublisher') })}
+        </span>
         <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>
           {skill.file_count} {t('skillHub.files')}
         </span>
@@ -367,6 +388,9 @@ function DetailView() {
         />
         <span className="font-bold truncate" style={{ color: 'var(--text-primary)', fontSize: 16 }}>
           {selectedSkill?.name}
+        </span>
+        <span className="truncate" style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+          {t('skillHub.publisher', { name: (skillDetail?.publisher || selectedSkill?.publisher) === 'system' ? t('skillHub.systemPublisher') : (skillDetail?.publisher || selectedSkill?.publisher || t('skillHub.systemPublisher')) })}
         </span>
         <div className="flex-1" />
         <button

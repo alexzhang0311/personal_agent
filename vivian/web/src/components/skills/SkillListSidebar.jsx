@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Search, Upload, RefreshCw, PanelLeftClose, PanelLeft, Settings, ToggleLeft, ToggleRight, Package, ArrowDownUp } from 'lucide-react'
+import { Search, Upload, RefreshCw, PanelLeftClose, PanelLeft, Settings, ToggleLeft, ToggleRight, Package, ArrowDownUp, Clock3, ShieldAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSidebarStore from '../../stores/sidebarStore'
 import useSkillsStore from '../../stores/skillsStore'
@@ -22,6 +22,9 @@ export default function SkillListSidebar() {
   const authUser = useAuthStore((s) => s.user)
   const toggleSettingsPopover = useUiStore((s) => s.toggleSettingsPopover)
   const openHub = useSkillHubStore((s) => s.openHub)
+  const submitSkill = useSkillHubStore((s) => s.submitSkill)
+  const publishingSkill = useSkillHubStore((s) => s.publishingSkill)
+  const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
   const openPushSync = useSkillSyncStore((s) => s.openPushSync)
   const openPullSync = useSkillSyncStore((s) => s.openPullSync)
 
@@ -162,6 +165,22 @@ export default function SkillListSidebar() {
       console.error('Upload failed:', err)
     }
     e.target.value = ''
+  }
+
+  const handlePublish = (skill) => {
+    const isUpdate = skill.publication?.published && skill.publication?.ownership === 'owned'
+    showConfirmDialog({
+      title: isUpdate ? t('skillHub.submitUpdateTitle') : t('skillHub.submitTitle'),
+      message: t(isUpdate ? 'skillHub.submitUpdateMessage' : 'skillHub.submitMessage', { name: skill.name }),
+      confirmLabel: t(isUpdate ? 'skillHub.submitUpdate' : 'skillHub.submit'),
+      onConfirm: async () => {
+        try {
+          await submitSkill(skill.name)
+        } catch (err) {
+          console.error('Skill Hub submission failed:', err)
+        }
+      },
+    })
   }
 
   if (collapsed) {
@@ -462,6 +481,9 @@ export default function SkillListSidebar() {
                     onClick={() => selectSkill('project', skill.name)}
                     showToggle
                     onToggle={() => toggleSkill(skill.name)}
+                    showPublish
+                    publishing={publishingSkill === skill.name}
+                    onPublish={() => handlePublish(skill)}
                   />
                 ))}
               </>
@@ -604,8 +626,32 @@ function SyncDropdownMenu({ menuRef, position, onPush, onPull }) {
   )
 }
 
-function SkillItem({ skill, isActive, onClick, showToggle, onToggle }) {
+function SkillItem({ skill, isActive, onClick, showToggle, onToggle, showPublish, publishing, onPublish }) {
   const enabled = skill.enabled !== false
+  const { t } = useTranslation()
+  const publication = skill.publication || {}
+  let publishTitle = publication.published ? t('skillHub.updateToHub') : t('skillHub.publishToHub')
+  let publishColor = 'var(--text-dim)'
+  let statusColor = 'transparent'
+  let publishDisabled = Boolean(publishing)
+  let PublishIcon = Upload
+
+  if (publication.ownership === 'other') {
+    publishTitle = t('skillHub.nameConflict')
+    publishDisabled = true
+    PublishIcon = ShieldAlert
+  } else if (publication.submission_status === 'pending') {
+    publishTitle = t(publication.published ? 'skillHub.updatePending' : 'skillHub.reviewPending')
+    publishColor = 'var(--purple)'
+    statusColor = 'var(--status-running)'
+    publishDisabled = true
+    PublishIcon = Clock3
+  } else if (publication.submission_status === 'rejected') {
+    publishTitle = t('skillHub.reviewRejected') + ': ' + (publication.rejection_reason || '')
+    publishColor = 'var(--red)'
+    statusColor = 'var(--status-error)'
+    PublishIcon = ShieldAlert
+  }
   return (
     <div
       className="flex items-start gap-0 px-3 py-2"
@@ -636,6 +682,23 @@ function SkillItem({ skill, isActive, onClick, showToggle, onToggle }) {
           </span>
         )}
       </div>
+      {showPublish && (
+        <button
+          className="flex items-center justify-center flex-shrink-0"
+          style={{
+            width: 28, height: 28, background: 'transparent', border: 'none',
+            borderLeft: '2px solid ' + statusColor, borderRadius: 2,
+            cursor: publishDisabled ? 'not-allowed' : 'pointer',
+            color: publishColor,
+            transition: 'color 150ms ease, border-color 150ms ease',
+          }}
+          disabled={publishDisabled}
+          title={publishTitle}
+          onClick={(e) => { e.stopPropagation(); onPublish?.() }}
+        >
+          <PublishIcon size={14} strokeWidth={1.5} />
+        </button>
+      )}
       {showToggle && (
         <button
           className="flex items-center justify-center flex-shrink-0"

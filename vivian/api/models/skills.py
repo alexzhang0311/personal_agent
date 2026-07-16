@@ -8,12 +8,21 @@ from pydantic import BaseModel, Field
 SkillLevel = Literal["project", "global"]
 
 
+class SkillPublicationInfo(BaseModel):
+    ownership: Literal["available", "owned", "other"] = "available"
+    published: bool = False
+    submission_status: Literal["pending", "rejected"] | None = None
+    rejection_reason: str | None = None
+    submitted_at: str | None = None
+
+
 class SkillSummary(BaseModel):
     name: str
     level: SkillLevel
     description: str | None = None
     file_count: int = 0
     enabled: bool = True
+    publication: SkillPublicationInfo | None = None
 
 
 class SkillListResponse(BaseModel):
