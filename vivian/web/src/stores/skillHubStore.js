@@ -3,45 +3,58 @@ import safeStorage from '../utils/safeStorage'
 import * as hubApi from '../api/skillHub'
 import useSkillsStore from './skillsStore'
 
-const useSkillHubStore = create((set, get) => ({
-  // Hub modal
-  open: false,
+const initialReviewState = {
+  hubView: 'catalog',
+  pendingSubmissions: [],
+  pendingLoading: false,
+  selectedSubmission: null,
+  submissionDetail: null,
+  submissionLoading: false,
+  reviewFile: null,
+  reviewFileContent: null,
+  reviewFileLoading: false,
+  reviewing: false,
+}
 
-  // Skill list
+const useSkillHubStore = create((set, get) => ({
+  open: false,
   skills: [],
   skillsLoading: true,
   searchQuery: '',
-
-  // Detail view
-  selectedSkill: null, // skill summary object
+  selectedSkill: null,
   skillDetail: null,
   detailLoading: false,
-
-  // File viewer
   selectedFile: null,
   fileContent: null,
   fileLoading: false,
   fileTreeWidth: safeStorage.getNumber('hub-filetree-width', 240, { min: 160, max: 400 }),
-
-  // Actions
   delivering: false,
   uploading: false,
+  publishingSkill: null,
+  ...initialReviewState,
 
   openHub: () => {
     set({ open: true })
     get().fetchSkills()
   },
 
-  closeHub: () => {
-    set({
-      open: false,
-      selectedSkill: null,
-      skillDetail: null,
-      selectedFile: null,
-      fileContent: null,
-      searchQuery: '',
-    })
-  },
+  closeHub: () => set({
+    open: false,
+    selectedSkill: null,
+    skillDetail: null,
+    selectedFile: null,
+    fileContent: null,
+    searchQuery: '',
+    ...initialReviewState,
+  }),
+
+  setHubView: (hubView) => set({
+    hubView,
+    selectedSkill: null,
+    skillDetail: null,
+    selectedFile: null,
+    fileContent: null,
+  }),
 
   fetchSkills: async () => {
     set({ skillsLoading: true })
@@ -53,15 +66,10 @@ const useSkillHubStore = create((set, get) => ({
     }
   },
 
-  setSearchQuery: (query) => set({ searchQuery: query }),
+  setSearchQuery: (searchQuery) => set({ searchQuery }),
 
   selectSkill: async (skill) => {
-    set({
-      selectedSkill: skill,
-      detailLoading: true,
-      selectedFile: null,
-      fileContent: null,
-    })
+    set({ selectedSkill: skill, detailLoading: true, selectedFile: null, fileContent: null })
     try {
       const detail = await hubApi.getHubSkillDetail(skill.name)
       set({ skillDetail: detail, detailLoading: false })
@@ -70,14 +78,12 @@ const useSkillHubStore = create((set, get) => ({
     }
   },
 
-  backToGrid: () => {
-    set({
-      selectedSkill: null,
-      skillDetail: null,
-      selectedFile: null,
-      fileContent: null,
-    })
-  },
+  backToGrid: () => set({
+    selectedSkill: null,
+    skillDetail: null,
+    selectedFile: null,
+    fileContent: null,
+  }),
 
   selectFile: async (path) => {
     const { selectedSkill } = get()
@@ -101,17 +107,103 @@ const useSkillHubStore = create((set, get) => ({
     try {
       await hubApi.deliverHubSkill(name)
       set({ delivering: false })
-      // Refresh hub skills to update installed status
       get().fetchSkills()
-      // Also update the detail if viewing this skill
       const { skillDetail } = get()
       if (skillDetail?.name === name) {
         set({ skillDetail: { ...skillDetail, installed: true } })
       }
-      // Refresh main skills list
       useSkillsStore.getState().fetchSkills()
     } catch (e) {
       set({ delivering: false })
+      throw e
+    }
+  },
+
+  submitSkill: async (name) => {
+    set({ publishingSkill: name })
+    try {
+      await hubApi.submitHubSkill(name)
+      set({ publishingSkill: null })
+      await useSkillsStore.getState().fetchSkills()
+    } catch (e) {
+      set({ publishingSkill: null })
+      throw e
+    }
+  },
+
+  fetchPendingSubmissions: async () => {
+    set({ pendingLoading: true })
+    try {
+      const data = await hubApi.listPendingSubmissions()
+      set({ pendingSubmissions: data.submissions || [], pendingLoading: false })
+    } catch (e) {
+      set({ pendingLoading: false })
+      throw e
+    }
+  },
+
+  selectSubmission: async (submission) => {
+    set({
+      selectedSubmission: submission,
+      submissionDetail: null,
+      submissionLoading: true,
+      reviewFile: null,
+      reviewFileContent: null,
+    })
+    try {
+      const detail = await hubApi.getSubmissionDetail(submission.id)
+      set({ submissionDetail: detail, submissionLoading: false })
+    } catch (e) {
+      set({ submissionLoading: false })
+      throw e
+    }
+  },
+
+  selectReviewFile: async (path) => {
+    const submission = get().selectedSubmission
+    if (!submission) return
+    set({ reviewFile: path, reviewFileLoading: true, reviewFileContent: null })
+    try {
+      const data = await hubApi.getSubmissionFile(submission.id, path)
+      set({ reviewFileContent: data, reviewFileLoading: false })
+    } catch (e) {
+      set({ reviewFileLoading: false })
+      throw e
+    }
+  },
+
+  approveSubmission: async (id) => {
+    set({ reviewing: true })
+    try {
+      await hubApi.approveSubmission(id)
+      set({
+        reviewing: false,
+        selectedSubmission: null,
+        submissionDetail: null,
+        reviewFile: null,
+        reviewFileContent: null,
+      })
+      await Promise.all([get().fetchPendingSubmissions(), get().fetchSkills()])
+    } catch (e) {
+      set({ reviewing: false })
+      throw e
+    }
+  },
+
+  rejectSubmission: async (id, reason) => {
+    set({ reviewing: true })
+    try {
+      await hubApi.rejectSubmission(id, reason)
+      set({
+        reviewing: false,
+        selectedSubmission: null,
+        submissionDetail: null,
+        reviewFile: null,
+        reviewFileContent: null,
+      })
+      await Promise.all([get().fetchPendingSubmissions(), useSkillsStore.getState().fetchSkills()])
+    } catch (e) {
+      set({ reviewing: false })
       throw e
     }
   },
@@ -150,6 +242,8 @@ const useSkillHubStore = create((set, get) => ({
     fileLoading: false,
     delivering: false,
     uploading: false,
+    publishingSkill: null,
+    ...initialReviewState,
   }),
 }))
 

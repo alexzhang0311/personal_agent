@@ -22,6 +22,24 @@ export const getHubSkillFile = (name, path) =>
 export const deliverHubSkill = (name) =>
   postJSON(`/resource/skill-hub/${encodeURIComponent(name)}/deliver`, {})
 
+export const submitHubSkill = (skillName) =>
+  postJSON('/resource/skill-hub/submissions', { skill_name: skillName })
+
+export const listPendingSubmissions = () =>
+  getJSON('/resource/skill-hub/submissions/pending')
+
+export const getSubmissionDetail = (id) =>
+  getJSON(`/resource/skill-hub/submissions/${encodeURIComponent(id)}`)
+
+export const getSubmissionFile = (id, path) =>
+  getJSON(`/resource/skill-hub/submissions/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`)
+
+export const approveSubmission = (id) =>
+  postJSON(`/resource/skill-hub/submissions/${encodeURIComponent(id)}/approve`, {})
+
+export const rejectSubmission = (id, reason) =>
+  postJSON(`/resource/skill-hub/submissions/${encodeURIComponent(id)}/reject`, { reason })
+
 export const uploadHubSkill = async (file) => {
   const formData = new FormData()
   formData.append('file', file)

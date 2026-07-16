@@ -261,16 +261,20 @@ def _validate_frontmatter(frontmatter: dict) -> None:
 
 
 def _safe_resolve(base: Path, relative: str) -> Path:
-    """Resolve path and verify it's inside base directory."""
+    """Resolve path and verify it is inside base directory."""
     resolved = (base / relative).resolve()
-    if not str(resolved).startswith(str(base.resolve())):
-        raise HTTPException(400, "Path traversal detected")
+    try:
+        resolved.relative_to(base.resolve())
+    except ValueError as exc:
+        raise HTTPException(400, "Path traversal detected") from exc
     return resolved
 
 
 def list_skills(username: str) -> SkillListResponse:
     skills: list[SkillSummary] = []
     exclude = set(_get_skill_exclude(username))
+    # Lazy import avoids a cycle: skill_hub reuses validation helpers here.
+    from .skill_hub import get_skill_publication
 
     for level in ("project", "global"):
         skills_dir = _get_skills_dir(level, username)
@@ -300,6 +304,7 @@ def list_skills(username: str) -> SkillListResponse:
                     description=fm.get("description"),
                     file_count=_count_files(entry),
                     enabled=entry.name not in exclude,
+                    publication=get_skill_publication(entry.name, username) if level == "project" else None,
                 )
             )
 
