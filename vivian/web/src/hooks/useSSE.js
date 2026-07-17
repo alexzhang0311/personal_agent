@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { streamAgentRun, streamAgentRunWS, respondPermission as respondPermissionAPI } from '../api/sse'
+import { streamAgentRun, streamAgentRunWS, subscribeAgentRunWS, subscribeAgentRunSSE, respondPermission as respondPermissionAPI } from '../api/sse'
 import useChatStore from '../stores/chatStore'
 import useTaskStore from '../stores/taskStore'
 import useUiStore from '../stores/uiStore'
@@ -21,10 +21,31 @@ import {
   fileTabFromToolUse,
   fileTabsFromGeneratedFiles,
 } from '../utils/fileArtifacts'
+import { getRunStatusPatch, shouldApplyRunEvent } from '../utils/runRouting'
 
 // Max characters of background-shell output kept in the task store; only the
 // tail is retained beyond this.
 const MAX_LIVE_OUTPUT = 200_000
+const runControls = new Map()
+
+function getClientTabId() {
+  try {
+    let id = window.sessionStorage.getItem('vivian-client-tab-id')
+    if (!id) {
+      id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2, 10)
+      window.sessionStorage.setItem('vivian-client-tab-id', id)
+    }
+    return id
+  } catch {
+    return window.__VIVIAN_TAB_ID || (window.__VIVIAN_TAB_ID = Math.random().toString(36).slice(2, 10))
+  }
+}
+
+export function getRunControls(runId) {
+  return runId ? runControls.get(runId) || null : null
+}
 
 // Module-level so session switches can kill the active stream without a
 // hook instance (e.g. from Sidebar before loading another session).
@@ -33,8 +54,11 @@ export function stopActiveStream() {
   // Invalidate in-flight onEvent/onComplete callbacks even when the abort
   // handle is already gone.
   bumpStreamGeneration()
-  if (streamAbort) {
-    streamAbort()
+  const activeId = useSidebarStore.getState().activeSessionId
+  const activeRow = useSidebarStore.getState().sessions.find((row) => row.id === activeId)
+  const scopedAbort = getRunControls(activeRow?.runId)?.abort || streamAbort
+  if (scopedAbort) {
+    scopedAbort()
     abortRunningTools()
     useTaskStore.getState().abortRunningTasks()
     setStreaming(false)
@@ -46,15 +70,33 @@ export function stopActiveStream() {
 
 export function useSSE() {
   const sendMessage = useCallback((message, permissionMode, attachments, attachmentsMeta, images) => {
-    const tabId = window.__VIVIAN_TAB_ID || (window.__VIVIAN_TAB_ID = Math.random().toString(36).slice(2, 8))
-    const { sessionId, setStreaming, setStreamAbort, setWsSendPermission, addMessage, addToolUse, updateToolResult, setStreamId, setPendingPermission, queuePermission, clearPermissions, setCompacting, setSessionId, enableFileCheckpointing, recordCheckpoint, setRetryState, clearRetryState, setLastUserPrompt } = useChatStore.getState()
+    const tabId = getClientTabId()
+    const { sessionId, setStreaming, setStreamAbort, setWsSendPermission, addMessage, addToolUse, updateToolResult, setStreamId, setPendingPermission, queuePermission, clearPermissions, setCompacting, setSessionId, setRunId, enableFileCheckpointing, recordCheckpoint, setRetryState, clearRetryState, setLastUserPrompt } = useChatStore.getState()
     setLastUserPrompt({ message, permissionMode, attachments, attachmentsMeta, images })
     clearRetryState()
     const promptPreview = String(message).replace(/\s+/g, ' ').slice(0, 120)
     console.info('[TAB:%s] sendMessage sessionId=%s prompt=%s', tabId, sessionId, promptPreview)
     const { addTask, updateTask, setTodos, setTodoWriteInfo } = useTaskStore.getState()
     const { showCanvas, setLastResult, setActiveCanvasTab } = useUiStore.getState()
-    const { activeSessionId, updateSession } = useSidebarStore.getState()
+    let { activeSessionId } = useSidebarStore.getState()
+    const { updateSession } = useSidebarStore.getState()
+    if (!activeSessionId) {
+      const draftId = `draft:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
+      useSidebarStore.getState().addSession({
+        id: draftId,
+        sessionId: null,
+        runId: null,
+        name: promptPreview || i18n.t('chat.newChat'),
+        firstPrompt: message,
+        createdAt: Date.now(),
+        sessionSource: 'project',
+        runStatus: 'running',
+      })
+      activeSessionId = draftId
+    } else {
+      updateSession(activeSessionId, { runStatus: 'running' })
+    }
+    let originSidebarId = activeSessionId
     const { addFileOp, updateFileOp, incrementRound } = useFileOpsStore.getState()
     const { openFile: openFileBrowserTab } = useFileBrowserStore.getState()
 
@@ -115,11 +157,49 @@ export function useSSE() {
       return true
     }
 
-    const onEvent = (event, data) => {
+    let transportControl = null
+    const onEvent = (event, data, meta = {}) => {
+      if (meta.runId && originSidebarId.startsWith('draft:')) {
+        const promotedId = `run:${meta.runId}`
+        useSidebarStore.getState().promoteSession(originSidebarId, promotedId, { runId: meta.runId })
+        originSidebarId = promotedId
+      }
+      const resolvedSessionId = meta.sessionId || (event === 'result' ? data?.session_id : null)
+      if (resolvedSessionId && originSidebarId !== resolvedSessionId) {
+        useSidebarStore.getState().promoteSession(originSidebarId, resolvedSessionId, {
+          sessionId: resolvedSessionId,
+          runId: meta.runId || useChatStore.getState().runId,
+        })
+        // A polling refresh may have canonicalized the row first. In that
+        // race, promoteSession has no source row, but subsequent events still
+        // need to target the canonical session row.
+        if (useSidebarStore.getState().sessions.some((row) => row.id === resolvedSessionId)) {
+          originSidebarId = resolvedSessionId
+        }
+      }
+      const isOriginActive = shouldApplyRunEvent(useSidebarStore.getState().activeSessionId, originSidebarId)
+      if (meta.runId) {
+        if (isOriginActive) {
+          setRunId(meta.runId)
+          setStreamId(meta.runId)
+        }
+        updateSession(originSidebarId, { runId: meta.runId, seq: meta.seq || 0 })
+        if (transportControl) runControls.set(meta.runId, transportControl)
+      }
+      if (meta.sessionId) {
+        updateSession(originSidebarId, { sessionId: meta.sessionId })
+      }
+      const statusPatch = getRunStatusPatch(event, data)
+      if (statusPatch) updateSession(originSidebarId, statusPatch)
+
+      // A stream may continue while another chat is selected. Keep its list
+      // metadata current, but never write its content or prompt cards into the
+      // active chat's singleton rendering stores.
+      if (!isOriginActive) return
       const state = useChatStore.getState()
       // Stale stream (session switched / stopped since this stream began):
       // drop the event so it can't overwrite the freshly loaded session.
-      if (state.streamGeneration !== streamGen) return
+      if (state.streamGeneration !== streamGen && state.runId !== meta.runId) return
       const msgs = [...state.messages]
       const lastIdx = msgs.length - 1
       const lastMsg = msgs[lastIdx]
@@ -178,9 +258,34 @@ export function useSSE() {
       switch (event) {
         case 'stream_init': {
           console.info('[TAB:%s] stream_init streamId=%s', tabId, data.stream_id)
-          if (data.stream_id) {
+          if (data.stream_id && !meta.runId) {
             setStreamId(data.stream_id)
           }
+          break
+        }
+
+        case 'run_started': {
+          if (data.run_id) {
+            setRunId(data.run_id)
+            setStreamId(data.run_id)
+            updateSession(originSidebarId, { runId: data.run_id, runStatus: data.status || 'running' })
+          }
+          break
+        }
+
+        case 'run_state': {
+          if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+            setStreaming(false)
+            setStreamAbort(null)
+          }
+          break
+        }
+
+        case 'permission_resolved':
+        case 'permission_conflict': {
+          useChatStore.getState().clearPendingAskUser()
+          useChatStore.getState().clearPermissions()
+          useChatStore.getState().clearPendingPlanApproval()
           break
         }
 
@@ -961,7 +1066,10 @@ export function useSSE() {
             }
           } else if (subtype === 'init') {
             const nested = data.data || {}
-            if (nested.session_id) setSessionId(nested.session_id)
+            if (nested.session_id) {
+              setSessionId(nested.session_id)
+              updateSession(originSidebarId, { sessionId: nested.session_id })
+            }
           }
           break
         }
@@ -1132,8 +1240,13 @@ export function useSSE() {
     }
 
     const onComplete = () => {
-      const { setStreaming, setStreamAbort, setWsSendPermission, setQueueSender, clearQueuedMessages, streamGeneration, messages: doneMsgs } = useChatStore.getState()
-      if (streamGeneration !== streamGen) return
+      if (useSidebarStore.getState().activeSessionId !== originSidebarId) {
+        const row = useSidebarStore.getState().sessions.find((item) => item.id === originSidebarId)
+        if (row?.runId) runControls.delete(row.runId)
+        useSidebarStore.getState().fetchSessions()
+        return
+      }
+      const { setStreaming, setStreamAbort, setWsSendPermission, setQueueSender, clearQueuedMessages, messages: doneMsgs } = useChatStore.getState()
       setStreaming(false)
       setStreamAbort(null)
       setWsSendPermission(null)
@@ -1145,6 +1258,8 @@ export function useSSE() {
       if (lastAssistant && !lastAssistant.error) {
         useChatStore.getState().clearLastUserPrompt()
       }
+      const completedRow = useSidebarStore.getState().sessions.find((item) => item.id === originSidebarId)
+      if (completedRow?.runId) runControls.delete(completedRow.runId)
       useSidebarStore.getState().fetchSessions()
     }
 
@@ -1152,13 +1267,154 @@ export function useSSE() {
 
     if (transport === 'ws') {
       const { abort, sendPermission, sendQueue, sendQueueCancel } = streamAgentRunWS(message, sessionId, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, { tabId }, enableFileCheckpointing)
+      transportControl = { abort, sendPermission, sendQueue, sendQueueCancel }
       setStreamAbort(abort)
       setWsSendPermission(sendPermission)
       useChatStore.getState().setQueueSender({ sendQueue, sendQueueCancel })
     } else {
       const { abort } = streamAgentRun(message, sessionId, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, enableFileCheckpointing)
+      transportControl = { abort, sendPermission: null, sendQueue: null, sendQueueCancel: null }
       setStreamAbort(abort)
     }
+  }, [])
+
+  const resumeRun = useCallback((session) => {
+    if (!session?.runId) return null
+    const existing = runControls.get(session.runId)
+    if (existing) {
+      useChatStore.getState().setRunId(session.runId)
+      useChatStore.getState().setStreamId(session.runId)
+      useChatStore.getState().setStreaming(true)
+      useChatStore.getState().setStreamAbort(existing.abort)
+      useChatStore.getState().setWsSendPermission(existing.sendPermission)
+      useChatStore.getState().setQueueSender({
+        sendQueue: existing.sendQueue,
+        sendQueueCancel: existing.sendQueueCancel,
+      })
+      return existing
+    }
+
+    const originSidebarId = session.id
+    const onRecoveredEvent = (event, data, meta = {}) => {
+      useSidebarStore.getState().updateSession(originSidebarId, {
+        runId: meta.runId || session.runId,
+        sessionId: meta.sessionId || session.sessionId,
+        seq: meta.seq || session.seq || 0,
+      })
+      const statusPatch = getRunStatusPatch(event, data)
+      if (statusPatch) useSidebarStore.getState().updateSession(originSidebarId, statusPatch)
+      if (!shouldApplyRunEvent(useSidebarStore.getState().activeSessionId, originSidebarId)) return
+
+      const chat = useChatStore.getState()
+      if (meta.runId) {
+        chat.setRunId(meta.runId)
+        chat.setStreamId(meta.runId)
+      }
+      if (meta.sessionId) chat.setSessionId(meta.sessionId)
+
+      if (event === 'assistant' && Array.isArray(data.content)) {
+        const blocks = data.content.filter((b) => b.type === 'thinking' || b.type === 'text')
+        if (!blocks.length) return
+        const msgs = useChatStore.getState().messages
+        const last = msgs[msgs.length - 1]
+        if (!last || last.role !== 'assistant') {
+          chat.addMessage({ role: 'assistant', content: blocks, timestamp: Date.now() })
+        } else {
+          chat.updateLastAssistantContent([...last.content, ...blocks])
+        }
+      } else if (event === 'tool_use' && Array.isArray(data.content)) {
+        for (const block of data.content.filter((b) => b.type === 'tool_use')) {
+          if (block.name === 'AskUserQuestion' && block.input?.questions) {
+            const ask = {
+              toolUseId: block.id,
+              questions: block.input.questions,
+            }
+            chat.setPendingAskUser(ask)
+            const msgs = useChatStore.getState().messages
+            const last = msgs[msgs.length - 1]
+            if (last?.role === 'assistant') {
+              chat.updateLastAssistantContent([...last.content, {
+                type: 'ask_user', id: block.id, toolUseId: block.id,
+                questions: block.input.questions, status: 'pending',
+              }])
+            }
+          } else {
+            chat.addToolUse({ ...block, status: 'running', startTime: Date.now() })
+          }
+        }
+      } else if (event === 'tool_result' && Array.isArray(data.content)) {
+        data.content.filter((b) => b?.type === 'tool_result' && b.tool_use_id)
+          .forEach((block) => chat.updateToolResult(block.tool_use_id, block))
+      } else if (event === 'permission_request') {
+        if (data.tool_name === 'ExitPlanMode') {
+          chat.setPendingPlanApproval({
+            requestId: data.request_id,
+            planContent: data.input?.plan || data.input?.content || '',
+            planFilePath: null,
+          })
+        } else if (data.tool_name === 'AskUserQuestion' && data.input?.questions) {
+          const ask = {
+            toolUseId: data.request_id,
+            questions: data.input.questions,
+            _permissionRequestId: data.request_id,
+          }
+          chat.setPendingAskUser(ask)
+          const msgs = useChatStore.getState().messages
+          const last = msgs[msgs.length - 1]
+          if (last?.role === 'assistant' && !last.content.some((b) => b.toolUseId === data.request_id)) {
+            chat.updateLastAssistantContent([...last.content, {
+              type: 'ask_user', id: data.request_id, toolUseId: data.request_id,
+              questions: data.input.questions, status: 'pending',
+            }])
+          }
+        } else {
+          chat.setPendingPermission(data)
+        }
+      } else if (event === 'permission_resolved' || event === 'permission_timeout' || event === 'permission_conflict') {
+        chat.clearPendingAskUser()
+        chat.clearPermissions()
+        chat.clearPendingPlanApproval()
+      } else if (event === 'result') {
+        if (data.session_id) chat.setSessionId(data.session_id)
+      } else if (event === 'run_state' && ['completed', 'failed', 'cancelled'].includes(data.status)) {
+        chat.setStreaming(false)
+        chat.setStreamAbort(null)
+        runControls.delete(session.runId)
+        useSidebarStore.getState().fetchSessions()
+      }
+    }
+
+    let control = null
+    const onComplete = () => {
+      runControls.delete(session.runId)
+      if (useSidebarStore.getState().activeSessionId === originSidebarId) {
+        useChatStore.getState().setStreaming(false)
+        useChatStore.getState().setStreamAbort(null)
+      }
+      useSidebarStore.getState().fetchSessions()
+    }
+    const resumeAfterSeq = session.sessionId ? (session.seq || 0) : 0
+    const transport = useSettingsStore.getState().transport === 'sse'
+      ? subscribeAgentRunSSE(session.runId, resumeAfterSeq, onRecoveredEvent, onComplete)
+      : subscribeAgentRunWS(
+          session.runId,
+          resumeAfterSeq,
+          onRecoveredEvent,
+          onComplete,
+          { tabId: getClientTabId() },
+        )
+    control = transport
+    runControls.set(session.runId, transport)
+    useChatStore.getState().setRunId(session.runId)
+    useChatStore.getState().setStreamId(session.runId)
+    useChatStore.getState().setStreaming(true)
+    useChatStore.getState().setStreamAbort(transport.abort)
+    useChatStore.getState().setWsSendPermission(transport.sendPermission)
+    useChatStore.getState().setQueueSender({
+      sendQueue: transport.sendQueue,
+      sendQueueCancel: transport.sendQueueCancel,
+    })
+    return control
   }, [])
 
   const sendAnswer = useCallback(async (answerText, toolUseId, answerData) => {
@@ -1280,5 +1536,5 @@ export function useSSE() {
 
   const stopStream = useCallback(() => stopActiveStream(), [])
 
-  return { sendMessage, stopStream, sendAnswer, declineAskUser, respondPermission }
+  return { sendMessage, resumeRun, stopStream, sendAnswer, declineAskUser, respondPermission }
 }
