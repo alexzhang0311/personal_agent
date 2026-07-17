@@ -359,6 +359,23 @@ read_new_server_log() {
     tail -c +"$((SERVER_LOG_START_OFFSET + 1))" "${SERVER_LOG}" 2>/dev/null || true
 }
 
+print_recent_startup_log() {
+    local recent_log
+    recent_log=$(read_new_server_log | tail -50)
+
+    if [ -n "${recent_log}" ]; then
+        log_error "Last lines from this startup attempt:"
+        printf '%s\n' "${recent_log}"
+    else
+        log_error "No new server log output was captured for this startup attempt"
+    fi
+}
+
+has_explicit_startup_failure() {
+    read_new_server_log | tail -200 | grep -qE \
+        'CRITICAL|FATAL|Traceback \(most recent call last\):|ImportError:|ModuleNotFoundError:|Error loading ASGI app|Application startup failed'
+}
+
 # Wait for startup with route verification
 wait_for_startup() {
     local timeout=30
@@ -375,20 +392,18 @@ wait_for_startup() {
             return 0
         fi
 
-        # Check for fatal errors in recent log output only to avoid stale matches from older runs.
-        if read_new_server_log | tail -200 | grep -qE "CRITICAL|FATAL"; then
-            log_error "Fatal error detected in server log"
-            read_new_server_log | tail -10
+        # Check only this startup attempt for explicit bootstrap failures. Avoid
+        # a generic ERROR match because applications may log recoverable errors.
+        if has_explicit_startup_failure; then
+            log_error "Explicit startup failure detected in server log"
+            print_recent_startup_log
             return 1
         fi
 
         # Check if process is still running
         if ! is_running; then
             log_error "Server process terminated unexpectedly"
-            if [ -f "${SERVER_LOG}" ]; then
-                log_error "Last lines from server log:"
-                read_new_server_log | tail -10
-            fi
+            print_recent_startup_log
             return 1
         fi
 
@@ -405,6 +420,7 @@ wait_for_startup() {
         describe_port_usage
         log_error "The process on port ${PORT} did not expose the expected API routes"
     fi
+    print_recent_startup_log
     return 1
 }
 
@@ -710,7 +726,9 @@ do_start() {
     # Start server in background
     cd "${PROJECT_ROOT}"
     log_info "Starting with host=${HOST}, port=${PORT}, workers=${WORKERS}"
-    nohup ${cmd} >/dev/null 2>&1 &
+    # Capture bootstrap output before the application's logging configuration
+    # is available (for example import errors and ASGI startup tracebacks).
+    nohup ${cmd} >>"${SERVER_LOG}" 2>&1 &
     local pid=$!
 
     # Save PID
