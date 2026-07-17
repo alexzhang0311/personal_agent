@@ -38,6 +38,7 @@ from .routers.user_data import router as user_data_router
 from .services.config import get_settings
 from .services.temp_files import cleanup_expired_files
 from .services.user_store import get_user_store
+from .services.version import get_app_version
 
 logger = get_app_logger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
@@ -91,6 +92,7 @@ def _configure_docs(app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    app_version = get_app_version()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -113,7 +115,7 @@ def create_app() -> FastAPI:
         logger.info(
             "Config loaded: {} v{}, server={}:{}, users={}",
             settings.app_name,
-            settings.app_version,
+            app_version,
             settings.server.host,
             settings.server.port,
             user_count,
@@ -172,7 +174,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title=settings.app_name,
-        version=settings.app_version,
+        version=app_version,
         docs_url=None,
         lifespan=lifespan,
     )
@@ -193,7 +195,7 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "app": settings.app_name,
-            "version": settings.app_version,
+            "version": app_version,
             "host": host,
             "port": port,
             "base_url": _base_url(host, port),

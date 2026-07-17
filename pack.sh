@@ -152,13 +152,22 @@ case "${PLATFORM}" in
         ;;
 esac
 
-# Read version from config.yaml
-VERSION=$(python3 -c "
-import yaml
-with open('vivian/api/config.yaml') as f:
-    cfg = yaml.safe_load(f) or {}
-print(cfg.get('app_version', '1.0.0'))
-" 2>/dev/null || echo "1.0.0")
+# VERSION is the project's single source of truth. Refuse to create an
+# ambiguously-versioned artifact when the file is missing or invalid.
+if [ ! -f "VERSION" ]; then
+    log_error "Root VERSION file not found"
+    exit 1
+fi
+VERSION=$(tr -d '[:space:]' < VERSION)
+if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+    log_error "Invalid SemVer in VERSION: ${VERSION}"
+    exit 1
+fi
+
+if ! python3 scripts/check_version.py; then
+    log_error "Project version fields are inconsistent"
+    exit 1
+fi
 
 BUILD_TS="$(date +%Y%m%d_%H%M%S)"
 ARCHIVE_NAME="vivian-${VERSION}-${PLATFORM_SUFFIX}-${BUILD_TS}"
@@ -194,6 +203,7 @@ cp -r vivian/bin    "${DIST_DIR}/${ARCHIVE_NAME}/bin"
 mkdir -p "${DIST_DIR}/${ARCHIVE_NAME}/web"
 cp -r vivian/web/dist "${DIST_DIR}/${ARCHIVE_NAME}/web/dist"
 cp    requirements.txt "${DIST_DIR}/${ARCHIVE_NAME}/requirements.txt"
+cp    VERSION CHANGELOG.md "${DIST_DIR}/${ARCHIVE_NAME}/"
 
 # Vite's vite-plugin-static-copy already copies public/fonts into dist/fonts
 # during `npm run build`. Only fall back to a manual copy when the build

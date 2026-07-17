@@ -1,5 +1,4 @@
 app_name: "TCTP vivian API Server"
-app_version: "1.0.0"
 
 server:
   host: "0.0.0.0"

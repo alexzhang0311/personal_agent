@@ -125,7 +125,14 @@ class AgentSettings(BaseModel):
 
 class Settings(BaseSettings):
     app_name: str = "TCTP vivian API Server"
-    app_version: str = "1.0.0"
+    # Backward-compatible input only: preserved production config files may
+    # still contain app_version. Runtime code must read the root VERSION file.
+    legacy_app_version: str | None = Field(
+        default=None,
+        validation_alias="app_version",
+        exclude=True,
+        repr=False,
+    )
     server: ServerSettings = Field(default_factory=ServerSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
