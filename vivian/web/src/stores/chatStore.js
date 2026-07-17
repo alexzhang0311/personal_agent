@@ -17,6 +17,7 @@ const useChatStore = create((set, get) => ({
   // hydrated in loadSession from sessionTransform.
   subagentContent: {},
   sessionId: null,
+  runId: null,
   inputText: '',
   isStreaming: false,
   isCompacting: false,
@@ -171,6 +172,7 @@ const useChatStore = create((set, get) => ({
     }
   },
   setSessionId: (id) => set({ sessionId: id }),
+  setRunId: (id) => set({ runId: id }),
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setStreamAbort: (abort) => set({ streamAbort: abort }),
   setPendingAskUser: (data) => set({ pendingAskUser: data }),
@@ -380,16 +382,17 @@ const useChatStore = create((set, get) => ({
   }),
 
   clearMessages: () => set({
-    messages: [], subagentContent: {}, sessionId: null, streamId: null, pendingPermission: null,
+    messages: [], subagentContent: {}, sessionId: null, runId: null, streamId: null, pendingAskUser: null, pendingPermission: null,
     permissionQueue: [], pendingPlanApproval: null, wsSendPermission: null,
-    attachments: [], quotedText: null, fileReference: null,
+    isStreaming: false, streamAbort: null, queueSender: null,
+    inputText: '', attachments: [], quotedText: null, fileReference: null,
     fileReferenceTemplate: null, selectedXlsxReference: null, selectedFileReference: null, isCompacting: false,
     checkpoints: [], forkParentId: null, enableFileCheckpointing: false,
     rewindMarker: null, queuedUserMessages: [], retryState: null, lastUserPrompt: null,
   }),
 
   reset: () => set({
-    messages: [], subagentContent: {}, sessionId: null, inputText: '', isStreaming: false, isCompacting: false,
+    messages: [], subagentContent: {}, sessionId: null, runId: null, inputText: '', isStreaming: false, isCompacting: false,
     streamAbort: null, pendingAskUser: null, streamId: null,
     pendingPermission: null, permissionQueue: [], permissionMode: 'bypassPermissions',
     pendingPlanApproval: null, availableSkills: [], skillsLoaded: false, skillsLoading: false,
@@ -402,7 +405,7 @@ const useChatStore = create((set, get) => ({
   }),
 
   // For loading a session
-  loadSession: (sessionId, messages, parentId = null, subagentContent = {}) => {
+  loadSession: (sessionId, messages, parentId = null, subagentContent = {}, runtime = {}) => {
     const restored = safeStorage.getBoolean(`${CKPT_STORAGE_PREFIX}${sessionId}`)
     let rewindMarker = null
     const parsed = safeStorage.getJSON(`${REWIND_STORAGE_PREFIX}${sessionId}`)
@@ -411,10 +414,26 @@ const useChatStore = create((set, get) => ({
     }
     set((s) => ({
       sessionId,
+      runId: runtime.runId || null,
       messages,
       subagentContent: subagentContent || {},
-      isStreaming: false,
-      inputText: '',
+      isStreaming: runtime.isStreaming || false,
+      pendingAskUser: runtime.pendingAskUser || null,
+      pendingPermission: runtime.pendingPermission || null,
+      pendingPlanApproval: runtime.pendingPlanApproval || null,
+      streamId: runtime.runId || null,
+      streamAbort: null,
+      wsSendPermission: null,
+      queueSender: null,
+      permissionQueue: [],
+      queuedUserMessages: [],
+      inputText: runtime.inputText || '',
+      attachments: runtime.attachments || [],
+      quotedText: runtime.quotedText || null,
+      fileReference: runtime.fileReference || null,
+      fileReferenceTemplate: runtime.fileReferenceTemplate || null,
+      selectedXlsxReference: runtime.selectedXlsxReference || null,
+      selectedFileReference: runtime.selectedFileReference || null,
       checkpoints: [],
       forkParentId: parentId,
       enableFileCheckpointing: restored,

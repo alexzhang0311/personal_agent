@@ -6,7 +6,7 @@ import i18n from '../i18n'
 const BASE_URL = '/api'
 
 const RECONNECT_BACKOFF = [1, 2, 4, 8, 16] // seconds — max 5 attempts
-const PROTOCOL_AUTH_CLOSE_CODES = new Set([1000, 1001, 4000, 4001])
+const PROTOCOL_AUTH_CLOSE_CODES = new Set([1000, 1001, 4000, 4001, 4003, 4004])
 
 /**
  * WebSocket-based streaming client.
@@ -16,29 +16,35 @@ const PROTOCOL_AUTH_CLOSE_CODES = new Set([1000, 1001, 4000, 4001])
  * [1, 2, 4, 8, 16] seconds for up to 5 attempts. Reconnects re-init with
  * the same session_id so the backend can pick up where it left off.
  */
-export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, trace, enableFileCheckpointing = false) {
+export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, trace, enableFileCheckpointing = false, resumeRunId = null, resumeAfterSeq = 0) {
   let ws = null
   let userAborted = false
   let completed = false
   let reconnectAttempt = 0
   let reconnectTimer = null
   let activeSessionId = sessionId
+  let activeRunId = resumeRunId
+  let lastSeq = resumeAfterSeq
 
   const sendInit = () => {
     const token = safeStorage.getItem('vivian-token')
-    const init = { type: 'init', message }
+    const init = activeRunId
+      ? { type: 'subscribe', run_id: activeRunId, after_seq: lastSeq }
+      : { type: 'init', message }
     if (trace?.tabId) init.client_tab_id = trace.tabId
     if (token) init.token = token
-    if (activeSessionId) init.session_id = activeSessionId
-    if (permissionMode) init.permission_mode = permissionMode
-    if (model) init.model = model
-    if (attachments && attachments.length > 0) init.attachments = attachments
-    if (images && images.length > 0) init.images = images
-    if (mcpServers !== undefined) init.mcp_servers = mcpServers
-    if (enableFileCheckpointing) init.enable_file_checkpointing = true
-    // WebUI can resolve prompts (permission card / AskUserQuestion), so opt in
-    // to synchronous feedback. The API default is false (non-interactive safe).
-    init.enable_permission_feedback = true
+    if (!activeRunId) {
+      if (activeSessionId) init.session_id = activeSessionId
+      if (permissionMode) init.permission_mode = permissionMode
+      if (model) init.model = model
+      if (attachments && attachments.length > 0) init.attachments = attachments
+      if (images && images.length > 0) init.images = images
+      if (mcpServers !== undefined) init.mcp_servers = mcpServers
+      if (enableFileCheckpointing) init.enable_file_checkpointing = true
+      // WebUI can resolve prompts (permission card / AskUserQuestion), so opt in
+      // to synchronous feedback. The API default is false (non-interactive safe).
+      init.enable_permission_feedback = true
+    }
     ws.send(JSON.stringify(init))
   }
 
@@ -86,12 +92,19 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
 
     ws.onmessage = (evt) => {
       try {
-        const { event, data } = JSON.parse(evt.data)
+        const envelope = JSON.parse(evt.data)
+        const { event, data } = envelope
         if (event === 'keepalive') return
-        // Track the latest session_id so a reconnect resumes the same conversation.
+        if (envelope.run_id) activeRunId = envelope.run_id
+        if (Number.isFinite(envelope.seq)) lastSeq = Math.max(lastSeq, envelope.seq)
+        if (envelope.session_id) activeSessionId = envelope.session_id
+        // Track the latest session_id for display/history hydration.
         if (event === 'result' && data?.session_id) activeSessionId = data.session_id
-        if (event === 'stream_init' && data?.stream_id) activeSessionId = data.stream_id
-        onEvent(event, data)
+        onEvent(event, data, {
+          runId: activeRunId,
+          sessionId: envelope.session_id || activeSessionId,
+          seq: envelope.seq || 0,
+        })
       } catch {
         // skip malformed JSON
       }
@@ -146,7 +159,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
 
   const sendPermission = (requestId, decision, msg, updatedInput) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      const frame = { type: 'permission_response', request_id: requestId, decision }
+      const frame = { type: 'permission_response', run_id: activeRunId, request_id: requestId, decision }
       if (msg) frame.message = msg
       if (updatedInput) frame.updated_input = updatedInput
       ws.send(JSON.stringify(frame))
@@ -155,7 +168,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
 
   const sendQueue = ({ id, text, attachments, images }) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
-    const frame = { type: 'queue', id, text }
+    const frame = { type: 'queue', run_id: activeRunId, id, text }
     if (attachments && attachments.length > 0) frame.attachments = attachments
     if (images && images.length > 0) frame.images = images
     ws.send(JSON.stringify(frame))
@@ -164,7 +177,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
 
   const sendQueueCancel = (id) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
-    ws.send(JSON.stringify({ type: 'queue_cancel', id }))
+    ws.send(JSON.stringify({ type: 'queue_cancel', run_id: activeRunId, id }))
     return true
   }
 
@@ -176,7 +189,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
     }
     if (ws && ws.readyState === WebSocket.OPEN) {
       try {
-        ws.send(JSON.stringify({ type: 'abort' }))
+        ws.send(JSON.stringify({ type: 'abort', run_id: activeRunId }))
       } catch {
         // ignore send errors on closing socket
       }
@@ -187,7 +200,63 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
 
   connect()
 
-  return { abort, sendPermission, sendQueue, sendQueueCancel }
+  return { abort, sendPermission, sendQueue, sendQueueCancel, getRunId: () => activeRunId, getLastSeq: () => lastSeq }
+}
+
+export function subscribeAgentRunWS(runId, afterSeq, onEvent, onComplete, trace) {
+  return streamAgentRunWS('', null, onEvent, null, onComplete, null, null, undefined, null, trace, false, runId, afterSeq)
+}
+
+export function subscribeAgentRunSSE(runId, afterSeq, onEvent, onComplete) {
+  const controller = new AbortController()
+  const run = async () => {
+    const res = await fetch(`${BASE_URL}/agent/runs/${encodeURIComponent(runId)}/events?after_seq=${afterSeq || 0}`, {
+      headers: { ...getAuthHeaders() },
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(`SSE subscribe error ${res.status}: ${await res.text()}`)
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let currentEvent = null
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('event: ')) currentEvent = line.slice(7).trim()
+        else if (line.startsWith('data: ') && currentEvent) {
+          const envelope = JSON.parse(line.slice(6))
+          onEvent(currentEvent, envelope.data, {
+            runId: envelope.run_id,
+            sessionId: envelope.session_id,
+            seq: envelope.seq || 0,
+          })
+          currentEvent = null
+        }
+      }
+    }
+  }
+  run().catch((err) => {
+    if (err.name !== 'AbortError') onEvent('error', { message: err.message })
+  }).finally(() => onComplete?.())
+
+  return {
+    abort: async () => {
+      try {
+        await fetch(`${BASE_URL}/agent/runs/${encodeURIComponent(runId)}/abort`, {
+          method: 'POST', headers: { ...getAuthHeaders() },
+        })
+      } finally {
+        controller.abort()
+      }
+    },
+    sendPermission: null,
+    sendQueue: null,
+    sendQueueCancel: null,
+  }
 }
 
 /**
@@ -196,6 +265,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
  */
 export function streamAgentRun(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, enableFileCheckpointing = false) {
   const controller = new AbortController()
+  let activeRunId = null
 
   const run = async () => {
     const body = { message, session_id: sessionId }
@@ -253,8 +323,17 @@ export function streamAgentRun(message, sessionId, onEvent, permissionMode, onCo
           currentEvent = line.slice(7).trim()
         } else if (line.startsWith('data: ') && currentEvent) {
           try {
-            const data = JSON.parse(line.slice(6))
-            onEvent(currentEvent, data)
+            const parsed = JSON.parse(line.slice(6))
+            if (parsed?.run_id && parsed?.event && Object.prototype.hasOwnProperty.call(parsed, 'data')) {
+              activeRunId = parsed.run_id
+              onEvent(currentEvent, parsed.data, {
+                runId: parsed.run_id,
+                sessionId: parsed.session_id,
+                seq: parsed.seq || 0,
+              })
+            } else {
+              onEvent(currentEvent, parsed)
+            }
           } catch {
             // skip malformed JSON
           }
@@ -275,15 +354,28 @@ export function streamAgentRun(message, sessionId, onEvent, permissionMode, onCo
     if (onComplete) onComplete()
   })
 
-  return { abort: () => controller.abort() }
+  return {
+    abort: async () => {
+      try {
+        if (activeRunId) {
+          await fetch(`${BASE_URL}/agent/runs/${encodeURIComponent(activeRunId)}/abort`, {
+            method: 'POST', headers: { ...getAuthHeaders() },
+          })
+        }
+      } finally {
+        controller.abort()
+      }
+    },
+  }
 }
 
 /**
  * Respond to a permission request.
  */
-export async function respondPermission(sessionId, requestId, decision, message, updatedInput) {
+export async function respondPermission(sessionId, requestId, decision, message, updatedInput, runId = null) {
   const body = {
     session_id: sessionId,
+    run_id: runId || undefined,
     request_id: requestId,
     decision,
   }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -39,18 +40,18 @@ from ..models.agent import (
     WsPermissionFrame,
     WsQueueCancelFrame,
     WsQueueFrame,
+    WsSubscribeFrame,
 )
-from ..services.claude_sdk.options import build_agent_options
-
-_ws_frame_adapter = TypeAdapter(WsClientFrame)
 from ..services.audit_log import AuditEntry, get_audit_logger
+from ..services.active_runs import active_run_manager
 from ..services.auth import authenticate_raw_token, decode_jwt, get_current_user, get_user_workspace
-from ..services.claude_sdk.client import agent_run, agent_run_events, agent_run_stream
+from ..services.claude_sdk.client import agent_run
+from ..services.claude_sdk.options import build_agent_options
 from ..services.claude_sdk.permission_coordinator import registry
 from ..services.user_store import UserRecord
 from ..metrics import AGENT_RUNS_FINISHED, AGENT_RUNS_STARTED
 
-import os
+_ws_frame_adapter = TypeAdapter(WsClientFrame)
 
 
 _ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
@@ -354,19 +355,37 @@ async def run_agent_stream(
     attachments = _validate_attachments(request.attachments, cwd)
     images = _validate_images(request.images)
     auth_method = getattr(http_request.state, "auth_method", "jwt")
-    return StreamingResponse(
-        agent_run_stream(
-            request.message, request.session_id, request.permission_mode,
-            cwd=cwd, username=username, model_override=request.model,
-            auth_method=auth_method,
-            attachments=attachments, images=images, mcp_servers=request.mcp_servers,
-            mask_output=(auth_method == "api_key"),
-            enable_file_checkpointing=request.enable_file_checkpointing,
-            fork_session=request.fork_session,
-            enable_permission_feedback=request.enable_permission_feedback,
-        ),
-        media_type="text/event-stream",
+    run = await active_run_manager.start(
+        owner_username=username,
+        prompt=request.message,
+        session_id=request.session_id,
+        kwargs={
+            "permission_mode": request.permission_mode,
+            "cwd": cwd,
+            "username": username,
+            "model_override": request.model,
+            "auth_method": auth_method,
+            "attachments": attachments,
+            "images": images,
+            "mcp_servers": request.mcp_servers,
+            "enable_file_checkpointing": request.enable_file_checkpointing,
+            "fork_session": request.fork_session,
+            "enable_permission_feedback": request.enable_permission_feedback,
+        },
     )
+
+    async def managed_stream():
+        subscription = active_run_manager.subscribe(run)
+        try:
+            while True:
+                envelope = await subscription.get()
+                yield f"event: {envelope['event']}\ndata: {json.dumps(envelope)}\n\n"
+                if envelope["event"] == "run_state" and envelope["data"].get("status") in {"completed", "failed", "cancelled"}:
+                    break
+        finally:
+            active_run_manager.unsubscribe(run, subscription)
+
+    return StreamingResponse(managed_stream(), media_type="text/event-stream")
 
 
 @router.get("/sessions", response_model=SessionListResponse)
@@ -408,6 +427,56 @@ async def list_agent_sessions(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/runs/active")
+async def list_active_runs(user: UserRecord | None = Depends(get_current_user)):
+    """List reconnectable runs owned by the current user."""
+    username = user.username if user else None
+    # Terminal runs remain in the manager briefly for direct replay by run_id,
+    # but they must not be returned as active sidebar rows. A completed turn
+    # and a later turn can share one Claude session_id; returning both here
+    # makes one Chat appear multiple times while the newer turn is active.
+    return {"runs": active_run_manager.list_for_owner(username)}
+
+
+def _owned_active_run(run_id: str, user: UserRecord | None):
+    run = active_run_manager.get(run_id)
+    username = user.username if user else None
+    if run is None:
+        raise HTTPException(404, "Active run not found")
+    if run.owner_username != username:
+        raise HTTPException(403, "Not authorized for this run")
+    return run
+
+
+@router.get("/runs/{run_id}/events")
+async def subscribe_active_run_events(
+    run_id: str,
+    after_seq: int = 0,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    run = _owned_active_run(run_id, user)
+
+    async def stream():
+        subscription = active_run_manager.subscribe(run, after_seq=max(0, after_seq))
+        try:
+            while True:
+                envelope = await subscription.get()
+                yield f"event: {envelope['event']}\ndata: {json.dumps(envelope)}\n\n"
+                if envelope["event"] == "run_state" and envelope["data"].get("status") in {"completed", "failed", "cancelled"}:
+                    break
+        finally:
+            active_run_manager.unsubscribe(run, subscription)
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.post("/runs/{run_id}/abort")
+async def abort_active_run(run_id: str, user: UserRecord | None = Depends(get_current_user)):
+    run = _owned_active_run(run_id, user)
+    await active_run_manager.abort(run)
+    return {"status": "ok"}
 
 
 @router.get("/sessions/{session_id}/messages", response_model=SessionMessagesResponse)
@@ -482,6 +551,24 @@ async def respond_permission(
     request: PermissionRespondRequest,
     user: UserRecord | None = Depends(get_current_user),
 ):
+    run = active_run_manager.get(request.run_id) if request.run_id else active_run_manager.find_legacy_identifier(request.session_id)
+    if run:
+        owner = run.owner_username
+        if owner is not None and (user is None or user.username != owner):
+            raise HTTPException(403, "Not authorized for this permission request")
+        try:
+            await active_run_manager.resolve_permission(
+                run,
+                request.request_id,
+                request.decision,
+                request.message or "",
+                request.updated_input,
+            )
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"status": "ok"}
+
+    # Compatibility path for legacy SSE streams created before ActiveRunManager.
     coordinator = registry.get(request.session_id)
     if not coordinator:
         raise HTTPException(404, "No active session for this stream")
@@ -623,25 +710,24 @@ async def ws_run(websocket: WebSocket):
     logger.info("[WS:%s] Connection accepted", ws_id)
     await websocket.accept()
 
-    # --- Read first message: init frame with auth ---
+    # The first frame either starts a new run or re-subscribes to an existing
+    # one. In both cases the websocket is only a subscriber: disconnecting it
+    # must never cancel the SDK task.
     try:
         raw_text = await websocket.receive_text()
         raw = json.loads(raw_text)
         client_tab_id = str(raw.get("client_tab_id") or "")[:32]
-        prompt_preview = " ".join(str(raw.get("message") or "").split())[:160]
-        logger.info("[WS:%s] INIT client_tab_id=%s prompt=%s", ws_id, client_tab_id, prompt_preview)
         frame = _ws_frame_adapter.validate_python(raw)
     except (json.JSONDecodeError, ValidationError) as exc:
         await websocket.send_json({"event": "error", "data": {"message": f"Invalid init frame: {exc}"}})
         await websocket.close(code=4000)
         return
 
-    if not isinstance(frame, WsInitFrame):
-        await websocket.send_json({"event": "error", "data": {"message": "First message must be type 'init'"}})
+    if not isinstance(frame, (WsInitFrame, WsSubscribeFrame)):
+        await websocket.send_json({"event": "error", "data": {"message": "First message must start or subscribe to a run"}})
         await websocket.close(code=4000)
         return
 
-    # --- Authenticate ---
     try:
         user = await authenticate_raw_token(frame.token, frame.x_user_name)
     except HTTPException:
@@ -651,8 +737,6 @@ async def ws_run(websocket: WebSocket):
 
     cwd = get_user_workspace(user)
     username = user.username if user else None
-
-    # Determine auth method for masking decision
     auth_method = "api_key"
     if frame.token:
         try:
@@ -660,36 +744,51 @@ async def ws_run(websocket: WebSocket):
             auth_method = "jwt"
         except HTTPException:
             pass
-    mask_output = auth_method == "api_key"
+    after_seq = 0
+    if isinstance(frame, WsSubscribeFrame):
+        run = active_run_manager.get(frame.run_id)
+        if run is None:
+            await websocket.send_json({"event": "error", "data": {"message": "Active run not found"}})
+            await websocket.close(code=4004)
+            return
+        if run.owner_username != username:
+            await websocket.send_json({"event": "error", "data": {"message": "Not authorized for this run"}})
+            await websocket.close(code=4003)
+            return
+        after_seq = frame.after_seq
+        prompt_preview = " ".join(run.first_prompt.split())[:160]
+        logger.info("[WS:%s] SUBSCRIBE run_id=%s after_seq=%s tab=%s", ws_id, run.run_id, after_seq, client_tab_id)
+    else:
+        prompt_preview = " ".join(frame.message.split())[:160]
+        try:
+            attachments = _validate_attachments(frame.attachments, cwd) if frame.attachments else None
+            images = _validate_images(frame.images)
+        except HTTPException as exc:
+            await websocket.send_json({"event": "error", "data": {"message": f"Validation failed: {exc.detail}"}})
+            await websocket.close(code=4000)
+            return
+        run = await active_run_manager.start(
+            owner_username=username,
+            prompt=frame.message,
+            session_id=frame.session_id,
+            kwargs={
+                "permission_mode": frame.permission_mode,
+                "cwd": cwd,
+                "username": username,
+                "model_override": frame.model,
+                "auth_method": auth_method,
+                "attachments": attachments,
+                "images": images,
+                "mcp_servers": frame.mcp_servers,
+                "enable_file_checkpointing": frame.enable_file_checkpointing,
+                "fork_session": frame.fork_session,
+                "enable_permission_feedback": frame.enable_permission_feedback,
+            },
+        )
+        logger.info("[WS:%s] START run_id=%s session_id=%s tab=%s prompt=%s", ws_id, run.run_id, frame.session_id, client_tab_id, prompt_preview)
 
-    logger.info(
-        "[WS:%s] Authenticated user=%s session_id=%s client_tab_id=%s prompt=%s",
-        ws_id,
-        username,
-        frame.session_id,
-        client_tab_id,
-        prompt_preview,
-    )
-
-    # Validate attachments and images if provided. This happens before the
-    # agent stream starts, so errors must be sent explicitly over the socket.
-    try:
-        attachments = _validate_attachments(frame.attachments, cwd) if frame.attachments else None
-        images = _validate_images(frame.images)
-    except HTTPException as exc:
-        await websocket.send_json({"event": "error", "data": {"message": f"Validation failed: {exc.detail}"}})
-        await websocket.close(code=4000)
-        return
-
-    # --- Set up agent run ---
-    cancelled = asyncio.Event()
-    coordinator_out: list = [None]
-    queue_out: list = [None]
-
-    # Load masking patterns once.
-    # Only applies when admin has explicitly saved patterns.
     _ws_mask_patterns: list[dict] = []
-    if mask_output:
+    if auth_method == "api_key":
         try:
             from ..services.user_store import get_user_store as _get_store
             runtime = _get_store().get_runtime_config()
@@ -697,29 +796,20 @@ async def ws_run(websocket: WebSocket):
             _ws_mask_patterns = list(pii_cfg.get("patterns") or [])
         except Exception:
             pass
+    subscription = active_run_manager.subscribe(run, after_seq=after_seq)
 
-    async def emit(event_type: str, data: dict) -> None:
-        if event_type == "permission_request":
-            logger.info(
-                "[WS:%s] EMIT permission_request request_id=%s tool=%s client_tab_id=%s prompt=%s",
-                ws_id,
-                data.get("request_id"),
-                data.get("tool_name"),
-                client_tab_id,
-                prompt_preview,
-            )
-        if event_type == "stream_init":
-            logger.info("[WS:%s] EMIT stream_init stream_id=%s", ws_id, data.get("stream_id"))
-        out_data = data
-        if _ws_mask_patterns and event_type not in ("keepalive", "stream_init", "permission_request", "permission_timeout"):
-            from ..utils.sensitive_mask import mask_sensitive
-            out_data, _ = mask_sensitive(_ws_mask_patterns, data)
-        try:
-            await websocket.send_json({"event": event_type, "data": out_data})
-        except Exception:
-            cancelled.set()
+    async def sender() -> None:
+        while True:
+            envelope = await subscription.get()
+            outgoing = envelope
+            if _ws_mask_patterns and envelope["event"] not in ("keepalive", "stream_init", "permission_request", "permission_timeout"):
+                from ..utils.sensitive_mask import mask_sensitive
+                masked, _ = mask_sensitive(_ws_mask_patterns, envelope["data"])
+                outgoing = {**envelope, "data": masked}
+            await websocket.send_json(outgoing)
+            if envelope["event"] == "run_state" and envelope["data"].get("status") in {"completed", "failed", "cancelled"}:
+                return
 
-    # --- Reader task: handle permission responses and abort ---
     async def reader() -> None:
         try:
             while True:
@@ -732,25 +822,26 @@ async def ws_run(websocket: WebSocket):
                     continue
 
                 if isinstance(msg, WsPermissionFrame):
-                    coord = coordinator_out[0]
-                    if coord:
-                        try:
-                            coord.resolve(
-                                msg.request_id,
-                                msg.decision,
-                                msg.message or "",
-                                msg.updated_input,
-                            )
-                        except ValueError as exc:
-                            await websocket.send_json({"event": "error", "data": {"message": str(exc)}})
-                    else:
-                        await websocket.send_json({"event": "error", "data": {"message": "No permission coordinator active"}})
-                elif isinstance(msg, WsInitFrame):
+                    target = active_run_manager.get(msg.run_id or run.run_id)
+                    if not target or target.owner_username != username:
+                        await websocket.send_json({"event": "error", "data": {"message": "Run not found or unauthorized"}})
+                        continue
+                    try:
+                        await active_run_manager.resolve_permission(target, msg.request_id, msg.decision, msg.message or "", msg.updated_input)
+                    except ValueError as exc:
+                        await websocket.send_json({
+                            "run_id": target.run_id,
+                            "session_id": target.session_id,
+                            "seq": target.seq,
+                            "event": "permission_conflict",
+                            "data": {"request_id": msg.request_id, "message": str(exc)},
+                        })
+                elif isinstance(msg, (WsInitFrame, WsSubscribeFrame)):
                     await websocket.send_json({"event": "error", "data": {"message": "Already initialized"}})
                 elif isinstance(msg, WsQueueFrame):
-                    q = queue_out[0]
-                    if q is None:
-                        await websocket.send_json({"event": "error", "data": {"message": "No active stream to queue into"}})
+                    target = active_run_manager.get(msg.run_id or run.run_id)
+                    if not target or target.owner_username != username:
+                        await websocket.send_json({"event": "error", "data": {"message": "Run not found or unauthorized"}})
                         continue
                     try:
                         q_attachments = _validate_attachments(msg.attachments, cwd) if msg.attachments else []
@@ -758,91 +849,41 @@ async def ws_run(websocket: WebSocket):
                     except HTTPException as exc:
                         await websocket.send_json({"event": "error", "data": {"message": f"Queue validation failed: {exc.detail}"}})
                         continue
-                    await q.put((msg.id, msg.text, q_attachments or [], q_images or []))
-                    await websocket.send_json({"event": "queued", "data": {"id": msg.id}})
+                    try:
+                        await active_run_manager.enqueue(target, (msg.id, msg.text, q_attachments or [], q_images or []))
+                    except ValueError as exc:
+                        await websocket.send_json({"event": "error", "data": {"message": str(exc)}})
                 elif isinstance(msg, WsQueueCancelFrame):
-                    q = queue_out[0]
-                    if q is None:
-                        await websocket.send_json({"event": "error", "data": {"message": "No active stream to cancel from"}})
+                    target = active_run_manager.get(msg.run_id or run.run_id)
+                    if not target or target.owner_username != username:
+                        await websocket.send_json({"event": "error", "data": {"message": "Run not found or unauthorized"}})
                         continue
-                    # asyncio.Queue has no random-access delete: drain + rebuild
-                    remaining: list[tuple[str, str, list, list]] = []
-                    removed = False
-                    while not q.empty():
-                        try:
-                            entry = q.get_nowait()
-                        except asyncio.QueueEmpty:
-                            break
-                        if entry[0] == msg.id and not removed:
-                            removed = True
-                            continue
-                        remaining.append(entry)
-                    for entry in remaining:
-                        q.put_nowait(entry)
-                    if removed:
-                        await websocket.send_json({"event": "queue_cancelled", "data": {"id": msg.id}})
-                    else:
+                    if not await active_run_manager.cancel_queued(target, msg.id):
                         await websocket.send_json({"event": "error", "data": {"message": f"Queued id not found: {msg.id}"}})
                 else:
-                    # WsAbortFrame
-                    cancelled.set()
+                    target = active_run_manager.get(msg.run_id or run.run_id)
+                    if target and target.owner_username == username:
+                        await active_run_manager.abort(target)
                     return
         except WebSocketDisconnect:
-            cancelled.set()
+            return
 
+    sender_task = asyncio.create_task(sender())
     reader_task = asyncio.create_task(reader())
-
-    AGENT_RUNS_STARTED.inc()
-    uncaught_exc: Exception | None = None
     try:
-        await agent_run_events(
-            frame.message,
-            frame.session_id,
-            frame.permission_mode,
-            cwd,
-            username,
-            frame.model,
-            auth_method=auth_method,
-            emit=emit,
-            cancelled=cancelled,
-            coordinator_out=coordinator_out,
-            queue_out=queue_out,
-            attachments=attachments,
-            images=images,
-            mcp_servers=frame.mcp_servers,
-            enable_file_checkpointing=frame.enable_file_checkpointing,
-            fork_session=frame.fork_session,
-            enable_permission_feedback=frame.enable_permission_feedback,
-        )
-    except Exception as exc:
-        uncaught_exc = exc
-        logger.exception("WebSocket agent run error")
-        try:
-            await websocket.send_json({"event": "stream_error", "data": {
-                "code": type(exc).__name__,
-                "message": str(exc) or repr(exc),
-                "fatal": True,
-                "api_error_status": getattr(exc, "api_error_status", None),
-            }})
-        except Exception:
-            pass
+        done, pending = await asyncio.wait({sender_task, reader_task}, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            try:
+                await task
+            except WebSocketDisconnect:
+                pass
     finally:
-        if uncaught_exc is not None:
-            run_outcome = "error"
-        elif cancelled.is_set():
-            run_outcome = "cancelled"
-        else:
-            run_outcome = "success"
-        AGENT_RUNS_FINISHED.labels(outcome=run_outcome).inc()
-
-        reader_task.cancel()
+        active_run_manager.unsubscribe(run, subscription)
+        for task in (sender_task, reader_task):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(sender_task, reader_task, return_exceptions=True)
         try:
-            await reader_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            # 4500 = server error; distinct from 4000 (protocol) and 4001 (auth)
-            close_code = 4500 if uncaught_exc is not None else 1000
-            await websocket.close(code=close_code)
+            await websocket.close(code=1000)
         except Exception:
             pass

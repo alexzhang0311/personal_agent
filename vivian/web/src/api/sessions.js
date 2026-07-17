@@ -13,6 +13,13 @@ export async function fetchSessions(limit = 20, offset = 0, source = 'project') 
   return handleAPIResponse(res)
 }
 
+export async function fetchActiveRuns() {
+  const res = await fetch(`${BASE_URL}/agent/runs/active`, {
+    headers: { ...getAuthHeaders() },
+  })
+  return handleAPIResponse(res)
+}
+
 export async function deleteSession(sessionId) {
   const res = await fetch(
     `${BASE_URL}/agent/sessions/${encodeURIComponent(sessionId)}`,

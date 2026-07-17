@@ -16,12 +16,28 @@ import {
 } from '../../api/sessions'
 import { UnauthorizedError } from '../../api/client'
 import { hasCanvasInspectorItems, transformSessionMessages } from '../../utils/sessionTransform'
-import { stopActiveStream } from '../../hooks/useSSE'
+import { useSSE } from '../../hooks/useSSE'
 import SidebarResizer from './SidebarResizer'
 import SettingsPopover from '../settings/SettingsPopover'
 import CopyButton from '../shared/CopyButton'
 import TagFilterChip from '../shared/TagFilterChip'
 import safeStorage from '../../utils/safeStorage'
+
+const chatDraftCache = new Map()
+
+function saveChatDraft(chatId) {
+  if (!chatId) return
+  const chat = useChatStore.getState()
+  chatDraftCache.set(chatId, {
+    inputText: chat.inputText,
+    attachments: chat.attachments,
+    quotedText: chat.quotedText,
+    fileReference: chat.fileReference,
+    fileReferenceTemplate: chat.fileReferenceTemplate,
+    selectedXlsxReference: chat.selectedXlsxReference,
+    selectedFileReference: chat.selectedFileReference,
+  })
+}
 
 function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
@@ -34,6 +50,18 @@ function SessionItem({
   }, [renameEditingId, session.id, session.name])
   const editing = renameEditingId === session.id
   const isProject = session.sessionSource === 'project'
+  const statusLabel = session.runStatus === 'waiting_user'
+    ? 'ACTION'
+    : session.runStatus === 'running'
+      ? 'RUNNING'
+      : null
+  const statusBorder = session.runStatus === 'waiting_user'
+    ? 'var(--status-pending)'
+    : session.runStatus === 'running'
+      ? 'var(--status-running)'
+      : isActive
+        ? 'var(--blue)'
+        : 'transparent'
   const menuItemStyle = {
     background: 'transparent',
     border: 'none',
@@ -47,7 +75,7 @@ function SessionItem({
       className="flex flex-col gap-1 px-3 py-2 group"
       style={{
         background: isActive ? 'var(--bg-elevated)' : 'transparent',
-        borderLeft: isActive ? '2px solid var(--blue)' : '2px solid transparent',
+        borderLeft: `2px solid ${statusBorder}`,
         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
         cursor: editing ? 'default' : 'pointer',
         fontSize: 13,
@@ -104,6 +132,20 @@ function SessionItem({
           >
             <GitBranch size={11} strokeWidth={1.5} />
             {session.forkCount}
+          </span>
+        )}
+        {statusLabel && !editing && (
+          <span
+            className="uppercase"
+            style={{
+              color: session.runStatus === 'waiting_user' ? 'var(--yellow)' : 'var(--purple)',
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: '0.06em',
+              flexShrink: 0,
+            }}
+          >
+            {statusLabel}
           </span>
         )}
         {isProject && !editing && (
@@ -365,6 +407,7 @@ export default function Sidebar() {
   const toggleSettingsPopover = useUiStore((s) => s.toggleSettingsPopover)
   const clearPlanContent = useUiStore((s) => s.clearPlanContent)
   const hideCanvas = useUiStore((s) => s.hideCanvas)
+  const { resumeRun } = useSSE()
   const listRef = useRef(null)
   const [openMenuId, setOpenMenuId] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -404,6 +447,15 @@ export default function Sidebar() {
   useEffect(() => {
     fetchSessions()
   }, [fetchSessions])
+
+  // Active-run state is process-local and may change while another chat is
+  // open. A lightweight refresh keeps RUNNING/ACTION labels current without
+  // routing background content through the active chat stores.
+  useEffect(() => {
+    if (!sessions.some((session) => session.runStatus === 'running' || session.runStatus === 'waiting_user')) return undefined
+    const timer = window.setInterval(fetchSessions, 3000)
+    return () => window.clearInterval(timer)
+  }, [sessions, fetchSessions])
 
   // Close menu on outside click
   useEffect(() => {
@@ -482,7 +534,8 @@ export default function Sidebar() {
   const effectiveWidth = collapsed ? 48 : width
 
   const handleNewChat = () => {
-    stopActiveStream()
+    saveChatDraft(activeSessionId)
+    setActiveSessionId(null)
     clearMessages()
     clearTasks()
     clearFileOps()
@@ -492,18 +545,68 @@ export default function Sidebar() {
   }
 
   const handleSelectSession = async (session) => {
-    // Kill any in-flight stream first so its late events can't bleed into
-    // the session we're about to load.
-    stopActiveStream()
+    if (activeSessionId !== session.id) saveChatDraft(activeSessionId)
     setActiveSessionId(session.id)
     clearTasks()
     useFileOpsStore.getState().clearFileOps()
     useFileBrowserStore.getState().clear()
     clearPlanContent()
     try {
-      const data = await fetchSessionMessages(session.sessionId || session.id)
-      const { messages, fileOps, fileBrowserTabs, tasks, subagentContent } = transformSessionMessages(data.messages || [])
-      loadSession(session.sessionId || session.id, messages, null, subagentContent)
+      const data = session.sessionId
+        ? await fetchSessionMessages(session.sessionId)
+        : { messages: [] }
+      const transformed = transformSessionMessages(data.messages || [])
+      const { fileOps, fileBrowserTabs, tasks, subagentContent } = transformed
+      let messages = transformed.messages
+      let pendingAskUser = null
+      let pendingPermission = null
+      let pendingPlanApproval = null
+      const pending = session.pendingRequest
+      if (pending?.tool_name === 'AskUserQuestion' && pending.input?.questions) {
+        pendingAskUser = {
+          toolUseId: pending.request_id,
+          questions: pending.input.questions,
+          _permissionRequestId: pending.request_id,
+        }
+        const askBlock = {
+          type: 'ask_user', id: pending.request_id, toolUseId: pending.request_id,
+          questions: pending.input.questions, status: 'pending',
+        }
+        const last = messages[messages.length - 1]
+        if (last?.role === 'assistant') {
+          if (!last.content.some((block) => block.toolUseId === pending.request_id)) {
+            messages = [...messages.slice(0, -1), { ...last, content: [...last.content, askBlock] }]
+          }
+        } else {
+          messages = [...messages, { role: 'assistant', content: [askBlock], timestamp: Date.now() }]
+        }
+      } else if (pending?.tool_name === 'ExitPlanMode') {
+        pendingPlanApproval = {
+          requestId: pending.request_id,
+          planContent: pending.input?.plan || pending.input?.content || '',
+          planFilePath: null,
+        }
+      } else if (pending) {
+        pendingPermission = pending
+      }
+      if (!messages.length && session.firstPrompt) {
+        messages = [
+          { role: 'user', content: [{ type: 'text', text: session.firstPrompt }], timestamp: session.createdAt || Date.now() },
+          { role: 'assistant', content: [], timestamp: Date.now() },
+        ]
+      }
+      const cachedDraft = chatDraftCache.get(session.id) || {}
+      loadSession(session.sessionId || null, messages, null, subagentContent, {
+        ...cachedDraft,
+        runId: session.runId,
+        isStreaming: session.runStatus === 'running' || session.runStatus === 'waiting_user',
+        pendingAskUser,
+        pendingPermission,
+        pendingPlanApproval,
+      })
+      if (session.runId && (session.runStatus === 'running' || session.runStatus === 'waiting_user')) {
+        resumeRun(session)
+      }
 
       // Populate file ops store
       const fileOpsStore = useFileOpsStore.getState()
@@ -552,6 +655,17 @@ export default function Sidebar() {
       })
     }
   }
+
+  const restoredActiveRef = useRef(false)
+  useEffect(() => {
+    if (restoredActiveRef.current || !activeSessionId || sessions.length === 0) return
+    const active = sessions.find((session) => session.id === activeSessionId)
+    if (!active) return
+    restoredActiveRef.current = true
+    if (useChatStore.getState().messages.length === 0) {
+      handleSelectSession(active)
+    }
+  }, [activeSessionId, sessions]) // handleSelectSession intentionally uses the latest render state
 
   const handleDeleteSession = (e, session) => {
     e.stopPropagation()
