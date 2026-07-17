@@ -54,3 +54,6 @@ nohup.out
 .node/
 .runtime/
 .venv/
+
+# ---- Learning ----
+learning/mini_vivian/tasks.json
