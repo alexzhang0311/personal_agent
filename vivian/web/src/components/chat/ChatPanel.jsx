@@ -53,6 +53,7 @@ export default function ChatPanel() {
   const sessionId = useChatStore((s) => s.sessionId)
   const messages = useChatStore((s) => s.messages)
   const sidebarSessions = useSidebarStore((s) => s.sessions)
+  const activeSessionId = useSidebarStore((s) => s.activeSessionId)
   const authUser = useAuthStore((s) => s.user)
   const canvasVisible = useUiStore((s) => s.canvasVisible)
   const canvasMinimized = useUiStore((s) => s.canvasMinimized)
@@ -60,7 +61,8 @@ export default function ChatPanel() {
   const showCanvas = useUiStore((s) => s.showCanvas)
   const setCanvasMinimized = useUiStore((s) => s.setCanvasMinimized)
   const setActiveCanvasTab = useUiStore((s) => s.setActiveCanvasTab)
-  const activeSidebarSession = sidebarSessions.find((s) => s.sessionId === sessionId || s.id === sessionId)
+  const activeSidebarSession = sidebarSessions.find((s) => s.id === activeSessionId)
+    || sidebarSessions.find((s) => s.sessionId === sessionId || s.id === sessionId)
   const sessionTitle = activeSidebarSession?.name || (sessionId ? sessionId : '')
   const isEmpty = messages.length === 0
   const activeCwd = activeSidebarSession?.cwd || authUser?.workspace

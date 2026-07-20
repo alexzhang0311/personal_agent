@@ -50,6 +50,7 @@ class AgentRunRequest(BaseModel):
 
 class PermissionRespondRequest(BaseModel):
     session_id: str
+    run_id: str | None = None
     request_id: str
     decision: PermissionDecision
     message: str | None = None
@@ -227,6 +228,7 @@ class WsInitFrame(BaseModel):
 class WsPermissionFrame(BaseModel):
     """Permission response from client."""
     type: Literal["permission_response"]
+    run_id: str | None = None
     request_id: str
     decision: PermissionDecision
     message: str | None = None
@@ -236,11 +238,13 @@ class WsPermissionFrame(BaseModel):
 class WsAbortFrame(BaseModel):
     """Abort signal from client."""
     type: Literal["abort"]
+    run_id: str | None = None
 
 
 class WsQueueFrame(BaseModel):
     """Mid-stream user message queued for injection at the next tool-result boundary."""
     type: Literal["queue"]
+    run_id: str | None = None
     id: str
     text: str
     attachments: list[AttachmentItem] | None = None
@@ -250,11 +254,22 @@ class WsQueueFrame(BaseModel):
 class WsQueueCancelFrame(BaseModel):
     """Cancel a previously queued message by id before it is delivered to the model."""
     type: Literal["queue_cancel"]
+    run_id: str | None = None
     id: str
 
 
+class WsSubscribeFrame(BaseModel):
+    """Attach a new transport to a process-local active run."""
+    type: Literal["subscribe"]
+    token: str | None = None
+    x_user_name: str | None = None
+    client_tab_id: str | None = None
+    run_id: str
+    after_seq: int = Field(default=0, ge=0)
+
+
 WsClientFrame = Annotated[
-    WsInitFrame | WsPermissionFrame | WsAbortFrame | WsQueueFrame | WsQueueCancelFrame,
+    WsInitFrame | WsSubscribeFrame | WsPermissionFrame | WsAbortFrame | WsQueueFrame | WsQueueCancelFrame,
     Field(discriminator="type"),
 ]
 

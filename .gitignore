@@ -28,6 +28,7 @@ yarn-error.log*
 
 # ---- Build artifacts / packaged releases ----
 dist/*.tar.gz
+dist/
 
 # ---- Runtime data ----
 # Agent gateway runtime queues, locks and auth token (machine-local, may hold secrets)
@@ -53,3 +54,6 @@ nohup.out
 .node/
 .runtime/
 .venv/
+
+# ---- Learning ----
+learning/mini_vivian/tasks.json

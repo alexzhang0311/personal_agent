@@ -1,5 +1,19 @@
 # TCTP-vivian — Claude Agent SDK Project Rules
 
+## Versioning and Git workflow (mandatory)
+
+> Full rules: `docs/versioning-and-branching.md`. Read them before every code or
+> documentation change.
+
+- Use the lightweight GitFlow model: `main` is production, `develop` is integration, and daily work happens on a short-lived typed branch.
+- Daily branches may merge directly into `develop` after validation. Only the regular release merge from `develop` to `main` requires a PR.
+- Never develop directly on `main` or `develop`. Agent branches use `<agent>/<type>/<description>` when the platform requires an agent prefix; other branches use `<type>/<ticket>-<description>`.
+- A hotfix starts from `main`, is validated and merged to `main` first, then must be synchronized to `develop`; it does not go through `develop` first.
+- Use Conventional Commits. Keep each branch and commit focused on one concern.
+- Root `VERSION` is the only source of truth; `config.yaml` must not contain the application version. Do not bump versions on normal work branches; update it only while preparing a `develop` release or a `hotfix`.
+- Add user-visible changes to `CHANGELOG.md` under `[Unreleased]` and run `python3 scripts/check_version.py` before handoff.
+- Before changing files, inspect the current branch and dirty worktree. Preserve unrelated user changes and do not switch branches when doing so could overwrite them.
+
 ## WebUI design
 
 > Full design spec: `web/design-spec.md`. This file is the executable summary.
