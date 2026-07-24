@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import useChatStore from '../chatStore'
-import useSidebarStore, { reconcileSessionRows } from '../sidebarStore'
+import useSidebarStore, { mapSession, reconcileSessionRows } from '../sidebarStore'
 import { getRunStatusPatch, shouldApplyRunEvent } from '../../utils/runRouting'
 
 describe('chat run isolation and recovery state', () => {
@@ -23,6 +23,28 @@ describe('chat run isolation and recovery state', () => {
       id: 'session-1', runId: 'run-1', sessionId: 'session-1',
     })
     expect(useSidebarStore.getState().activeSessionId).toBe('session-1')
+  })
+
+  it('maps scheduler discovery metadata onto sidebar rows', () => {
+    expect(mapSession({
+      session_id: 'scheduled-1',
+      custom_title: 'Nightly report',
+      last_modified: 123,
+      session_kind: 'scheduler',
+      scheduler_context: {
+        job_id: 'job-1',
+        job_name: 'Nightly',
+        run_id: 'run-1',
+      },
+    })).toMatchObject({
+      id: 'scheduled-1',
+      sessionKind: 'scheduler',
+      schedulerContext: {
+        job_id: 'job-1',
+        job_name: 'Nightly',
+        run_id: 'run-1',
+      },
+    })
   })
 
   it('coalesces retained and current runs that share one session', () => {

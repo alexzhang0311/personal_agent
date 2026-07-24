@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useState, useMemo } from 'react'
-import { PlusCircle, MessageSquare, PanelLeftClose, PanelLeft, Trash2, ChevronDown, MoreHorizontal, RefreshCw, Settings, Search, X, Pencil, Flag, GitBranch } from 'lucide-react'
+import { PlusCircle, MessageSquare, CalendarClock, PanelLeftClose, PanelLeft, Trash2, ChevronDown, MoreHorizontal, RefreshCw, Settings, Search, X, Pencil, Flag, GitBranch } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSidebarStore from '../../stores/sidebarStore'
 import useChatStore from '../../stores/chatStore'
@@ -20,8 +20,8 @@ import { useSSE } from '../../hooks/useSSE'
 import SidebarResizer from './SidebarResizer'
 import SettingsPopover from '../settings/SettingsPopover'
 import CopyButton from '../shared/CopyButton'
-import TagFilterChip from '../shared/TagFilterChip'
 import safeStorage from '../../utils/safeStorage'
+import { formatSessionTime, groupSessionsByDate } from '../../utils/sessionList'
 
 const chatDraftCache = new Map()
 
@@ -50,6 +50,9 @@ function SessionItem({
   }, [renameEditingId, session.id, session.name])
   const editing = renameEditingId === session.id
   const isProject = session.sessionSource === 'project'
+  const isScheduler = session.sessionKind === 'scheduler'
+  const SessionIcon = isScheduler ? CalendarClock : MessageSquare
+  const sessionTime = formatSessionTime(session.createdAt)
   const statusLabel = session.runStatus === 'waiting_user'
     ? 'ACTION'
     : session.runStatus === 'running'
@@ -86,7 +89,7 @@ function SessionItem({
       onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
     >
       <div className="flex items-center gap-2 min-w-0">
-        <MessageSquare size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
+        <SessionIcon size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
         {editing ? (
           <input
             type="text"
@@ -118,6 +121,19 @@ function SessionItem({
           />
         ) : (
           <span className="flex-1 truncate" style={{ minWidth: 0 }}>{session.name}</span>
+        )}
+        {sessionTime && !editing && (
+          <span
+            style={{
+              color: 'var(--text-dim)',
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: 10,
+              fontWeight: 300,
+              flexShrink: 0,
+            }}
+          >
+            {sessionTime}
+          </span>
         )}
         {session.forkCount > 0 && !editing && (
           <span
@@ -239,6 +255,21 @@ function SessionItem({
           </div>
         )}
       </div>
+      {isScheduler && session.schedulerContext?.job_name && !editing && (
+        <div
+          className="truncate"
+          style={{
+            paddingLeft: 19,
+            color: 'var(--text-dim)',
+            fontSize: 11,
+            fontWeight: 300,
+            minWidth: 0,
+          }}
+          title={session.schedulerContext.job_name}
+        >
+          {session.schedulerContext.job_name}
+        </div>
+      )}
       {session.tag && !editing && (
         <div className="flex items-center gap-1" style={{ paddingLeft: 19 }}>
           <span
@@ -397,6 +428,11 @@ export default function Sidebar() {
   const fetchMoreSessions = useSidebarStore((s) => s.fetchMoreSessions)
   const sessionsHasMore = useSidebarStore((s) => s.sessionsHasMore)
   const sessionsLoading = useSidebarStore((s) => s.sessionsLoading)
+  const sessionKind = useSidebarStore((s) => s.sessionKind)
+  const sessionQuery = useSidebarStore((s) => s.sessionQuery)
+  const sessionCounts = useSidebarStore((s) => s.sessionCounts)
+  const setSessionKind = useSidebarStore((s) => s.setSessionKind)
+  const setSessionQuery = useSidebarStore((s) => s.setSessionQuery)
   const clearMessages = useChatStore((s) => s.clearMessages)
   const loadSession = useChatStore((s) => s.loadSession)
   const currentSessionId = useChatStore((s) => s.sessionId)
@@ -410,15 +446,13 @@ export default function Sidebar() {
   const { resumeRun } = useSSE()
   const listRef = useRef(null)
   const [openMenuId, setOpenMenuId] = useState(null)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState(sessionQuery)
   const menuRef = useRef(null)
   const [renameEditingId, setRenameEditingId] = useState(null)
   const [tagPopoverSession, setTagPopoverSession] = useState(null)
   const [tagPopoverTop, setTagPopoverTop] = useState(120)
   const tagPopoverRef = useRef(null)
 
-  const activeTag = useSidebarStore((s) => s.activeTag)
-  const setActiveTag = useSidebarStore((s) => s.setActiveTag)
   const availableTags = useMemo(() => {
     const seen = new Set()
     const out = []
@@ -431,22 +465,16 @@ export default function Sidebar() {
     return out
   }, [sessions])
 
-  // Filter sessions by tag + search query into a single flat list
-  const filteredSessions = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase()
-    const tagFiltered = activeTag ? sessions.filter((s) => s.tag === activeTag) : sessions
-    return q
-      ? tagFiltered.filter((s) => {
-          const sid = (s.sessionId || s.id || '').toLowerCase()
-          const name = (s.name || '').toLowerCase()
-          return sid.includes(q) || name.includes(q)
-        })
-      : tagFiltered
-  }, [sessions, searchQuery, activeTag])
+  const groupedSessions = useMemo(() => groupSessionsByDate(sessions), [sessions])
 
   useEffect(() => {
     fetchSessions()
   }, [fetchSessions])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSessionQuery(searchQuery), 300)
+    return () => window.clearTimeout(timer)
+  }, [searchQuery, setSessionQuery])
 
   // Active-run state is process-local and may change while another chat is
   // open. A lightweight refresh keeps RUNNING/ACTION labels current without
@@ -515,11 +543,6 @@ export default function Sidebar() {
         row.id === session.id ? { ...row, tag: nextTag } : row
       ),
     }))
-    // If the currently-active tag filter matches a tag that no longer exists, reset.
-    if (activeTag && nextTag !== activeTag) {
-      const stillExists = useSidebarStore.getState().sessions.some((s) => s.tag === activeTag)
-      if (!stillExists) setActiveTag(null)
-    }
   }
 
   // Infinite scroll: load more when scrolled near bottom
@@ -534,6 +557,11 @@ export default function Sidebar() {
   const effectiveWidth = collapsed ? 48 : width
 
   const handleNewChat = () => {
+    if (sessionKind !== 'chat') setSessionKind('chat')
+    if (searchQuery) {
+      setSearchQuery('')
+      setSessionQuery('')
+    }
     saveChatDraft(activeSessionId)
     setActiveSessionId(null)
     clearMessages()
@@ -683,7 +711,16 @@ export default function Sidebar() {
         safeStorage.removeItem(`vivian-rewind:${session.sessionId || session.id}`)
         const store = useSidebarStore.getState()
         const newSessions = store.sessions.filter((s) => s.id !== session.id)
-        useSidebarStore.setState({ sessions: newSessions, sessionsTotal: store.sessionsTotal - 1 })
+        const kind = session.sessionKind || 'chat'
+        useSidebarStore.setState({
+          sessions: newSessions,
+          sessionsTotal: Math.max(0, store.sessionsTotal - 1),
+          sessionCounts: {
+            ...store.sessionCounts,
+            [kind]: Math.max(0, store.sessionCounts[kind] - 1),
+            all: Math.max(0, store.sessionCounts.all - 1),
+          },
+        })
         if (activeSessionId === session.id) {
           clearMessages()
           clearTasks()
@@ -824,6 +861,55 @@ export default function Sidebar() {
             </>
           )}
 
+          {/* Session origin filter */}
+          <div
+            className="flex items-center gap-1 px-3 py-2"
+            style={{ borderBottom: '1px solid var(--border-subtle)' }}
+          >
+            {[
+              ['chat', t('sidebar.chats'), sessionCounts.chat],
+              ['scheduler', t('sidebar.scheduled'), sessionCounts.scheduler],
+              ['all', t('sidebar.all'), sessionCounts.all],
+            ].map(([kind, label, count]) => {
+              const active = sessionKind === kind
+              return (
+                <button
+                  key={kind}
+                  type="button"
+                  className="flex-1 min-w-0 truncate"
+                  aria-pressed={active}
+                  onClick={() => setSessionKind(kind)}
+                  style={{
+                    background: active ? 'var(--bg-elevated)' : 'transparent',
+                    border: 'none',
+                    borderLeft: `2px solid ${active ? 'var(--blue)' : 'transparent'}`,
+                    borderRadius: 2,
+                    color: active ? 'var(--text-primary)' : 'var(--text-dim)',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontWeight: active ? 600 : 400,
+                    padding: '4px 3px',
+                    transition: 'background 150ms ease, color 150ms ease',
+                  }}
+                  title={`${label} (${count})`}
+                >
+                  {label}
+                  {width >= 220 && (
+                    <span
+                      style={{
+                        marginLeft: 4,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontWeight: 300,
+                      }}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+
           {/* Search + Refresh */}
           <div className="flex items-center gap-2 px-3 py-1">
             <div
@@ -890,38 +976,9 @@ export default function Sidebar() {
               onMouseEnter={(e) => { if (!sessionsLoading) e.currentTarget.style.color = 'var(--text-secondary)' }}
               onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
             >
-              <RefreshCw
-                size={13}
-                strokeWidth={1.5}
-                style={{
-                  animation: sessionsLoading ? 'spin 1s linear infinite' : 'none',
-                }}
-              />
+              <RefreshCw size={13} strokeWidth={1.5} />
             </button>
           </div>
-
-          {/* Tag filter bar (only when at least one tag exists) */}
-          {availableTags.length > 0 && (
-            <div
-              className="flex flex-wrap gap-1 px-3 py-2"
-              style={{ borderBottom: '1px solid var(--border-subtle)' }}
-            >
-              <TagFilterChip
-                active={activeTag === null}
-                label={t('sidebar.all')}
-                showIcon={false}
-                onClick={() => setActiveTag(null)}
-              />
-              {availableTags.map((tag) => (
-                <TagFilterChip
-                  key={tag}
-                  active={activeTag === tag}
-                  label={tag}
-                  onClick={() => setActiveTag(tag)}
-                />
-              ))}
-            </div>
-          )}
 
           {/* Tag popover host — fixed-position, anchored to the trigger row */}
           {tagPopoverSession && (
@@ -941,13 +998,17 @@ export default function Sidebar() {
 
           {/* Session List */}
           <div className="flex-1 overflow-y-auto py-1" ref={listRef} onScroll={handleScroll}>
-            {sessions.length === 0 && !sessionsLoading && (
+            {sessions.length === 0 && !sessionsLoading && !sessionQuery && (
               <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
-                {t('sidebar.noSessions')}
+                {sessionKind === 'scheduler'
+                  ? t('sidebar.noScheduledSessions')
+                  : sessionKind === 'chat'
+                    ? t('sidebar.noChatSessions')
+                    : t('sidebar.noSessions')}
               </div>
             )}
 
-            {searchQuery && sessions.length > 0 && filteredSessions.length === 0 && (
+            {sessionQuery && sessions.length === 0 && !sessionsLoading && (
               <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
                 {t('sidebar.noResults')}
               </div>
@@ -964,23 +1025,48 @@ export default function Sidebar() {
               </div>
             )}
 
-            {filteredSessions.map((session) => (
-              <SessionItem
-                key={session.id}
-                session={session}
-                isActive={session.id === activeSessionId}
-                openMenuId={openMenuId}
-                menuRef={menuRef}
-                onSelect={handleSelectSession}
-                onMenuToggle={setOpenMenuId}
-                onDelete={handleDeleteSession}
-                onRenameStart={handleRenameStart}
-                onTagStart={handleTagStart}
-                renameEditingId={renameEditingId}
-                onRenameCommit={handleRenameCommit}
-                onRenameCancel={handleRenameCancel}
-                t={t}
-              />
+            {groupedSessions.map((group) => (
+              <div key={group.key}>
+                <div
+                  className="sticky"
+                  style={{
+                    top: 0,
+                    zIndex: 2,
+                    background: 'var(--bg-surface)',
+                    color: 'var(--text-dim)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: '0.06em',
+                    padding: '7px 12px 3px',
+                  }}
+                >
+                  {group.key === 'today'
+                    ? t('sidebar.today')
+                    : group.key === 'yesterday'
+                      ? t('sidebar.yesterday')
+                      : group.key === 'earlier'
+                        ? t('sidebar.more')
+                        : group.key}
+                </div>
+                {group.sessions.map((session) => (
+                  <SessionItem
+                    key={session.id}
+                    session={session}
+                    isActive={session.id === activeSessionId}
+                    openMenuId={openMenuId}
+                    menuRef={menuRef}
+                    onSelect={handleSelectSession}
+                    onMenuToggle={setOpenMenuId}
+                    onDelete={handleDeleteSession}
+                    onRenameStart={handleRenameStart}
+                    onTagStart={handleTagStart}
+                    renameEditingId={renameEditingId}
+                    onRenameCommit={handleRenameCommit}
+                    onRenameCancel={handleRenameCancel}
+                    t={t}
+                  />
+                ))}
+              </div>
             ))}
 
             {sessionsHasMore && (

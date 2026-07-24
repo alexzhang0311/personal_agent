@@ -2,11 +2,19 @@ import { getAuthHeaders, handleAPIResponse } from './client'
 
 const BASE_URL = '/api'
 
-export async function fetchSessions(limit = 20, offset = 0, source = 'project') {
+export async function fetchSessions({
+  limit = 20,
+  offset = 0,
+  source = 'project',
+  kind = 'all',
+  q = '',
+} = {}) {
   const params = new URLSearchParams()
   params.set('limit', String(limit))
   params.set('offset', String(offset))
   params.set('source', source)
+  params.set('kind', kind)
+  if (q.trim()) params.set('q', q.trim())
   const res = await fetch(`${BASE_URL}/agent/sessions?${params}`, {
     headers: { ...getAuthHeaders() },
   })

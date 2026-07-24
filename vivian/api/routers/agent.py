@@ -15,7 +15,7 @@ from claude_agent_sdk import (
     tag_session as sdk_tag_session,
 )
 from claude_agent_sdk._internal.sessions import _canonicalize_path, _get_project_dir
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import TypeAdapter, ValidationError
 
@@ -30,7 +30,9 @@ from ..models.agent import (
     RenameRequest,
     RewindRequest,
     RewindResponse,
+    SchedulerSessionContext,
     SessionInfoResponse,
+    SessionKindCounts,
     SessionListResponse,
     SessionMessageResponse,
     SessionMessagesResponse,
@@ -48,6 +50,7 @@ from ..services.auth import authenticate_raw_token, decode_jwt, get_current_user
 from ..services.claude_sdk.client import agent_run
 from ..services.claude_sdk.options import build_agent_options
 from ..services.claude_sdk.permission_coordinator import registry
+from ..services.session_origins import delete_session_origin, load_session_origins
 from ..services.user_store import UserRecord
 from ..metrics import AGENT_RUNS_FINISHED, AGENT_RUNS_STARTED
 
@@ -390,23 +393,54 @@ async def run_agent_stream(
 
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_agent_sessions(
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     source: Literal["all", "project", "global"] = "all",  # deprecated — ignored
+    kind: Literal["all", "chat", "scheduler"] = "all",
+    q: str | None = Query(default=None, max_length=200),
     user: UserRecord | None = Depends(get_current_user),
 ):
-    """List past sessions from this project workspace (paginated).
+    """List and search past sessions from this project workspace.
 
     The ``source`` query parameter is accepted for backwards compatibility
     but ignored — every response now contains only ``<work_dir>/<username>``
-    sessions, tagged as ``"project"``.
+    sessions, tagged as ``"project"``. Source/search filtering happens before
+    pagination so older matching sessions are discoverable.
     """
     del source  # legacy parameter, kept for client compat
     cwd = get_user_workspace(user)
     raw = list_sessions(directory=cwd)
+    origins = load_session_origins(cwd)
+    needle = (q or "").strip().casefold()
+    enriched: list[tuple[object, str, dict[str, str] | None]] = []
+    for session in raw:
+        scheduler_context = origins.get(session.session_id)
+        session_kind = "scheduler" if scheduler_context else "chat"
+        if needle:
+            values = (
+                session.session_id,
+                session.custom_title,
+                session.first_prompt,
+                session.summary,
+                getattr(session, "tag", None),
+                scheduler_context.get("job_name") if scheduler_context else None,
+            )
+            if not any(needle in str(value).casefold() for value in values if value):
+                continue
+        enriched.append((session, session_kind, scheduler_context))
 
-    total = len(raw)
-    page = raw[offset : offset + limit]
+    counts = SessionKindCounts(
+        chat=sum(1 for _, session_kind, _ in enriched if session_kind == "chat"),
+        scheduler=sum(1 for _, session_kind, _ in enriched if session_kind == "scheduler"),
+        all=len(enriched),
+    )
+    filtered = (
+        enriched
+        if kind == "all"
+        else [row for row in enriched if row[1] == kind]
+    )
+    total = len(filtered)
+    page = filtered[offset : offset + limit]
     return SessionListResponse(
         sessions=[
             SessionInfoResponse(
@@ -420,12 +454,18 @@ async def list_agent_sessions(
                 cwd=s.cwd,
                 session_source="project",
                 tag=getattr(s, "tag", None),
+                session_kind=session_kind,
+                scheduler_context=(
+                    SchedulerSessionContext(**scheduler_context)
+                    if scheduler_context else None
+                ),
             )
-            for s in page
+            for s, session_kind, scheduler_context in page
         ],
         total=total,
         limit=limit,
         offset=offset,
+        counts=counts,
     )
 
 
@@ -533,6 +573,10 @@ async def delete_agent_session(session_id: str, user: UserRecord | None = Depend
         raise HTTPException(404, "Session file not found")
 
     session_file.unlink()
+    try:
+        delete_session_origin(cwd, session_id)
+    except Exception:
+        logger.exception("Failed to delete session origin metadata for %s", session_id)
 
     actor = user.username if user else "anonymous"
     audit = get_audit_logger()

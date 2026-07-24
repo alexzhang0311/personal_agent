@@ -8,6 +8,7 @@ const STORAGE_KEY_COLLAPSED = 'sidebar-collapsed'
 const PAGE_SIZE = 20
 const ACTIVE_CHAT_KEY = 'vivian-active-chat'
 const ACTIVE_SESSION_ALIAS_KEY = 'vivian-active-session-alias'
+let sessionsRequestGeneration = 0
 
 const getStoredActiveChat = () => {
   try { return window.sessionStorage.getItem(ACTIVE_CHAT_KEY) }
@@ -48,7 +49,7 @@ const persistWidth = (width) => {
   }, 200)
 }
 
-function mapSession(s) {
+export function mapSession(s) {
   return {
     id: s.session_id,
     sessionId: s.session_id,
@@ -65,6 +66,8 @@ function mapSession(s) {
     parentSessionId: s.parent_session_id || null,
     parentMessageUuid: s.parent_message_uuid || null,
     forkCount: s.fork_count || 0,
+    sessionKind: s.session_kind || 'chat',
+    schedulerContext: s.scheduler_context || null,
   }
 }
 
@@ -127,6 +130,7 @@ export function reconcileSessionRows(persisted, activeRuns, previous = []) {
       firstPrompt: run.first_prompt || base.firstPrompt || persistedRow?.firstPrompt,
       createdAt: Math.round((run.updated_at || run.created_at || Date.now() / 1000) * 1000),
       sessionSource: 'project',
+      sessionKind: 'chat',
       runStatus: run.status,
       pendingRequest: run.pending_requests?.[0] || null,
       seq: run.seq || base.seq || 0,
@@ -153,11 +157,9 @@ const useSidebarStore = create((set, get) => ({
   sessionsOffset: 0,
   sessionsLoading: false,
   sessionsHasMore: false,
-  // Source filter
-  sessionsSource: 'project',
-  // Tag filter (null = show all)
-  activeTag: null,
-  setActiveTag: (tag) => set({ activeTag: tag }),
+  sessionKind: 'chat',
+  sessionQuery: '',
+  sessionCounts: { chat: 0, scheduler: 0, all: 0 },
 
   setWidth: (width) => {
     set({ width })
@@ -181,16 +183,24 @@ const useSidebarStore = create((set, get) => ({
   },
 
   addSession: (session) => set((s) => {
+    const normalized = { sessionKind: 'chat', ...session }
     const withoutDuplicate = s.sessions.filter((row) => (
-      row.id !== session.id &&
-      (!session.runId || row.runId !== session.runId) &&
-      (!session.sessionId || row.sessionId !== session.sessionId)
+      row.id !== normalized.id &&
+      (!normalized.runId || row.runId !== normalized.runId) &&
+      (!normalized.sessionId || row.sessionId !== normalized.sessionId)
     ))
-    persistActiveChat(session.id)
+    persistActiveChat(normalized.id)
+    const added = withoutDuplicate.length === s.sessions.length ? 1 : 0
     return {
-      sessions: [session, ...withoutDuplicate],
-      activeSessionId: session.id,
-      sessionsTotal: s.sessionsTotal + (withoutDuplicate.length === s.sessions.length ? 1 : 0),
+      sessions: [normalized, ...withoutDuplicate],
+      activeSessionId: normalized.id,
+      sessionsTotal: s.sessionsTotal + added,
+      sessionKind: 'chat',
+      sessionCounts: {
+        ...s.sessionCounts,
+        chat: s.sessionCounts.chat + added,
+        all: s.sessionCounts.all + added,
+      },
     }
   }),
 
@@ -230,22 +240,71 @@ const useSidebarStore = create((set, get) => ({
     sessions: s.sessions.map((sess) => sess.runId === runId ? { ...sess, ...data } : sess),
   })),
 
-  setSessionsSource: (source) => {
-    set({ sessionsSource: source, sessions: [], sessionsOffset: 0, sessionsHasMore: false })
+  setSessionKind: (kind) => {
+    if (kind === get().sessionKind) return
+    sessionsRequestGeneration += 1
+    set({
+      sessionKind: kind,
+      sessions: [],
+      sessionsTotal: 0,
+      sessionsOffset: 0,
+      sessionsHasMore: false,
+    })
+    get().fetchSessions()
+  },
+
+  setSessionQuery: (query) => {
+    const normalized = query.trim()
+    if (normalized === get().sessionQuery) return
+    sessionsRequestGeneration += 1
+    set({
+      sessionQuery: normalized,
+      sessions: [],
+      sessionsTotal: 0,
+      sessionsOffset: 0,
+      sessionsHasMore: false,
+    })
     get().fetchSessions()
   },
 
   fetchSessions: async () => {
-    const { sessionsSource } = get()
+    const { sessionKind, sessionQuery } = get()
+    const generation = ++sessionsRequestGeneration
     set({ sessionsLoading: true })
     try {
       const [data, activeData] = await Promise.all([
-        apiFetchSessions(PAGE_SIZE, 0, sessionsSource),
-        fetchActiveRuns().catch(() => ({ runs: [] })),
+        apiFetchSessions({
+          limit: PAGE_SIZE,
+          offset: 0,
+          kind: sessionKind,
+          q: sessionQuery,
+        }),
+        sessionKind === 'scheduler'
+          ? Promise.resolve({ runs: [] })
+          : fetchActiveRuns().catch(() => ({ runs: [] })),
       ])
-      const persisted = (data.sessions || []).map(mapSession)
+      if (generation !== sessionsRequestGeneration) return
+      const hasKindMetadata = Boolean(data.counts)
+      const mappedPersisted = (data.sessions || []).map(mapSession)
+      // During a rolling deployment an older API may ignore `kind` and omit
+      // classification metadata. Those legacy rows are all historical chats:
+      // keep Chat/All useful, but never leak them into the Scheduler view.
+      const persisted = hasKindMetadata || sessionKind !== 'scheduler'
+        ? mappedPersisted
+        : []
       const previous = get().sessions
       const sessions = reconcileSessionRows(persisted, activeData.runs || [], previous)
+      const unpersistedActive = sessions.filter((row) => row.runId && !row.sessionId).length
+      const persistedTotal = hasKindMetadata
+        ? (data.total ?? persisted.length)
+        : sessionKind === 'scheduler'
+          ? 0
+          : (data.total ?? persisted.length)
+      const counts = data.counts || {
+        chat: data.total ?? mappedPersisted.length,
+        scheduler: 0,
+        all: data.total ?? mappedPersisted.length,
+      }
       const storedActive = get().activeSessionId
       const storedAlias = getStoredSessionAlias()
       const restoredActive = sessions.find((row) => (
@@ -257,46 +316,70 @@ const useSidebarStore = create((set, get) => ({
       set({
         sessions,
         activeSessionId: restoredActive,
-        sessionsTotal: (data.total || persisted.length) + sessions.filter((row) => row.runId && !row.sessionId).length,
+        sessionsTotal: persistedTotal + unpersistedActive,
         sessionsOffset: persisted.length,
-        sessionsHasMore: persisted.length < (data.total || 0),
+        sessionsHasMore: persisted.length < persistedTotal,
+        sessionCounts: {
+          chat: counts.chat + unpersistedActive,
+          scheduler: counts.scheduler,
+          all: counts.all + unpersistedActive,
+        },
       })
     } catch (err) {
       if (err instanceof UnauthorizedError) return
       console.error('Failed to fetch sessions:', err)
     } finally {
-      set({ sessionsLoading: false })
+      if (generation === sessionsRequestGeneration) set({ sessionsLoading: false })
     }
   },
 
   reset: () => set({
     sessions: [], activeSessionId: getStoredActiveChat(),
     sessionsTotal: 0, sessionsOffset: 0, sessionsLoading: false,
-    sessionsHasMore: false, sessionsSource: 'project',
+    sessionsHasMore: false, sessionKind: 'chat', sessionQuery: '',
+    sessionCounts: { chat: 0, scheduler: 0, all: 0 },
   }),
 
   fetchMoreSessions: async () => {
-    const { sessionsOffset, sessionsLoading, sessionsHasMore, sessionsSource } = get()
+    const {
+      sessionsOffset, sessionsLoading, sessionsHasMore,
+      sessionKind, sessionQuery,
+    } = get()
     if (sessionsLoading || !sessionsHasMore) return
+    const generation = sessionsRequestGeneration
     set({ sessionsLoading: true })
     try {
-      const data = await apiFetchSessions(PAGE_SIZE, sessionsOffset, sessionsSource)
+      const data = await apiFetchSessions({
+        limit: PAGE_SIZE,
+        offset: sessionsOffset,
+        kind: sessionKind,
+        q: sessionQuery,
+      })
+      if (generation !== sessionsRequestGeneration) return
       const newSessions = (data.sessions || []).map(mapSession)
       set((s) => {
         const combined = dedupeSessionRows([...s.sessions, ...newSessions])
-        const total = data.total || combined.length
+        const total = data.total ?? combined.length
+        const unpersistedActive = combined.filter((row) => row.runId && !row.sessionId).length
         return {
           sessions: combined,
-          sessionsTotal: total,
-          sessionsOffset: combined.length,
-          sessionsHasMore: combined.length < total,
+          sessionsTotal: total + unpersistedActive,
+          sessionsOffset: s.sessionsOffset + newSessions.length,
+          sessionsHasMore: s.sessionsOffset + newSessions.length < total,
+          sessionCounts: data.counts
+            ? {
+                chat: data.counts.chat + unpersistedActive,
+                scheduler: data.counts.scheduler,
+                all: data.counts.all + unpersistedActive,
+              }
+            : s.sessionCounts,
         }
       })
     } catch (err) {
       if (err instanceof UnauthorizedError) return
       console.error('Failed to fetch more sessions:', err)
     } finally {
-      set({ sessionsLoading: false })
+      if (generation === sessionsRequestGeneration) set({ sessionsLoading: false })
     }
   },
 }))

@@ -146,6 +146,12 @@ class HookEventPayload(BaseModel):
     data: dict[str, Any] | None = None
 
 
+class SchedulerSessionContext(BaseModel):
+    job_id: str
+    job_name: str
+    run_id: str
+
+
 class SessionInfoResponse(BaseModel):
     session_id: str
     summary: str
@@ -160,6 +166,14 @@ class SessionInfoResponse(BaseModel):
     parent_session_id: str | None = None
     parent_message_uuid: str | None = None
     fork_count: int = 0
+    session_kind: Literal["chat", "scheduler"] = "chat"
+    scheduler_context: SchedulerSessionContext | None = None
+
+
+class SessionKindCounts(BaseModel):
+    chat: int = 0
+    scheduler: int = 0
+    all: int = 0
 
 
 class SessionMessageResponse(BaseModel):
@@ -176,6 +190,7 @@ class SessionListResponse(BaseModel):
     total: int = 0
     limit: int = 20
     offset: int = 0
+    counts: SessionKindCounts = Field(default_factory=SessionKindCounts)
 
 
 class SessionMessagesResponse(BaseModel):
