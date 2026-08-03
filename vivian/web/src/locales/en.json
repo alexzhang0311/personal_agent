@@ -49,7 +49,18 @@
     "renameFailed": "Rename failed",
     "tagPlaceholder": "tag...",
     "tagClear": "Clear",
-    "tagSave": "Save"
+    "tagSave": "Save",
+    "newFolder": "New folder",
+    "unfiled": "Unfiled",
+    "emptyFolder": "Empty folder",
+    "folderMenu": "Folder menu",
+    "folderCreateFailed": "Failed to create folder",
+    "folderRenameFailed": "Failed to rename folder",
+    "folderDeleteTitle": "Delete folder",
+    "folderDeleteMessage": "Sessions in \"{{name}}\" will return to Unfiled.",
+    "folderDeleteFailed": "Failed to delete folder",
+    "moveToFolder": "Move to folder",
+    "moveFailed": "Failed to move session"
   },
   "chat": {
     "placeholder": "Use / to select a skill\nUse @ to attach an uploaded file",

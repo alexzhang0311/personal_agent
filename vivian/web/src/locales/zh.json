@@ -49,7 +49,18 @@
     "renameFailed": "重命名失败",
     "tagPlaceholder": "标签...",
     "tagClear": "清除",
-    "tagSave": "保存"
+    "tagSave": "保存",
+    "newFolder": "新建文件夹",
+    "unfiled": "未归档",
+    "emptyFolder": "空文件夹",
+    "folderMenu": "文件夹菜单",
+    "folderCreateFailed": "创建文件夹失败",
+    "folderRenameFailed": "重命名文件夹失败",
+    "folderDeleteTitle": "删除文件夹",
+    "folderDeleteMessage": "文件夹「{{name}}」中的会话将回到未归档。",
+    "folderDeleteFailed": "删除文件夹失败",
+    "moveToFolder": "移到文件夹",
+    "moveFailed": "移动会话失败"
   },
   "chat": {
     "placeholder": "输入 / 选择技能\n输入 @ 附加已上传文件",

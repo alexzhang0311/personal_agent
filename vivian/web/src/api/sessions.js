@@ -28,6 +28,65 @@ export async function fetchActiveRuns() {
   return handleAPIResponse(res)
 }
 
+export async function fetchSessionFolders() {
+  const res = await fetch(`${BASE_URL}/agent/session-folders`, {
+    headers: { ...getAuthHeaders() },
+  })
+  return handleAPIResponse(res)
+}
+
+export async function createSessionFolder(name) {
+  const res = await fetch(`${BASE_URL}/agent/session-folders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ name }),
+  })
+  return handleAPIResponse(res)
+}
+
+export async function renameSessionFolder(folderId, name) {
+  const res = await fetch(
+    `${BASE_URL}/agent/session-folders/${encodeURIComponent(folderId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ name }),
+    }
+  )
+  return handleAPIResponse(res)
+}
+
+export async function deleteSessionFolder(folderId) {
+  const res = await fetch(
+    `${BASE_URL}/agent/session-folders/${encodeURIComponent(folderId)}`,
+    { method: 'DELETE', headers: { ...getAuthHeaders() } }
+  )
+  return handleAPIResponse(res)
+}
+
+export async function fetchFolderSessions(folderId, { limit = 20, offset = 0 } = {}) {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  params.set('offset', String(offset))
+  const res = await fetch(
+    `${BASE_URL}/agent/session-folders/${encodeURIComponent(folderId)}/sessions?${params}`,
+    { headers: { ...getAuthHeaders() } }
+  )
+  return handleAPIResponse(res)
+}
+
+export async function moveSessionToFolder(sessionId, folderId) {
+  const res = await fetch(
+    `${BASE_URL}/agent/sessions/${encodeURIComponent(sessionId)}/folder`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ folder_id: folderId ?? null }),
+    }
+  )
+  return handleAPIResponse(res)
+}
+
 export async function deleteSession(sessionId) {
   const res = await fetch(
     `${BASE_URL}/agent/sessions/${encodeURIComponent(sessionId)}`,

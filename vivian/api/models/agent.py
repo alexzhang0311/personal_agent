@@ -168,6 +168,7 @@ class SessionInfoResponse(BaseModel):
     fork_count: int = 0
     session_kind: Literal["chat", "scheduler"] = "chat"
     scheduler_context: SchedulerSessionContext | None = None
+    folder_id: str | None = None
 
 
 class SessionKindCounts(BaseModel):
@@ -191,6 +192,18 @@ class SessionListResponse(BaseModel):
     limit: int = 20
     offset: int = 0
     counts: SessionKindCounts = Field(default_factory=SessionKindCounts)
+
+
+class SessionFolderResponse(BaseModel):
+    folder_id: str
+    name: str
+    created_at: str
+    session_count: int = 0
+
+
+class SessionFolderListResponse(BaseModel):
+    folders: list[SessionFolderResponse] = Field(default_factory=list)
+    unfiled_count: int = 0
 
 
 class SessionMessagesResponse(BaseModel):
@@ -317,3 +330,13 @@ class RenameRequest(BaseModel):
 
 class TagRequest(BaseModel):
     tag: str | None = None
+
+
+class SessionFolderNameRequest(BaseModel):
+    # Storage validation runs after trimming so whitespace outside a valid
+    # 1–64 character name does not incorrectly fail request parsing.
+    name: str
+
+
+class SessionFolderMoveRequest(BaseModel):
+    folder_id: str | None = None

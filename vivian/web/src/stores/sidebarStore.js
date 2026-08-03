@@ -1,5 +1,14 @@
 import { create } from 'zustand'
-import { fetchSessions as apiFetchSessions, fetchActiveRuns } from '../api/sessions'
+import {
+  createSessionFolder as apiCreateSessionFolder,
+  deleteSessionFolder as apiDeleteSessionFolder,
+  fetchActiveRuns,
+  fetchFolderSessions as apiFetchFolderSessions,
+  fetchSessionFolders as apiFetchSessionFolders,
+  fetchSessions as apiFetchSessions,
+  moveSessionToFolder as apiMoveSessionToFolder,
+  renameSessionFolder as apiRenameSessionFolder,
+} from '../api/sessions'
 import { UnauthorizedError } from '../api/client'
 import safeStorage from '../utils/safeStorage'
 
@@ -8,6 +17,7 @@ const STORAGE_KEY_COLLAPSED = 'sidebar-collapsed'
 const PAGE_SIZE = 20
 const ACTIVE_CHAT_KEY = 'vivian-active-chat'
 const ACTIVE_SESSION_ALIAS_KEY = 'vivian-active-session-alias'
+const EXPANDED_FOLDERS_KEY = 'session-folder-expanded'
 let sessionsRequestGeneration = 0
 
 const getStoredActiveChat = () => {
@@ -49,6 +59,17 @@ const persistWidth = (width) => {
   }, 200)
 }
 
+const getStoredExpandedFolders = () => {
+  const value = safeStorage.getJSON(EXPANDED_FOLDERS_KEY, [])
+  return Array.isArray(value) ? value.filter((id) => typeof id === 'string') : []
+}
+
+const persistExpandedFolders = (folderIds) => {
+  safeStorage.setItem(EXPANDED_FOLDERS_KEY, JSON.stringify(folderIds))
+}
+
+const isFolderMode = (kind, query) => kind === 'chat' && !query
+
 export function mapSession(s) {
   return {
     id: s.session_id,
@@ -68,6 +89,7 @@ export function mapSession(s) {
     forkCount: s.fork_count || 0,
     sessionKind: s.session_kind || 'chat',
     schedulerContext: s.scheduler_context || null,
+    folderId: s.folder_id || null,
   }
 }
 
@@ -160,6 +182,12 @@ const useSidebarStore = create((set, get) => ({
   sessionKind: 'chat',
   sessionQuery: '',
   sessionCounts: { chat: 0, scheduler: 0, all: 0 },
+  sessionFolders: [],
+  unfiledCount: 0,
+  folderBuckets: {},
+  expandedFolderIds: getStoredExpandedFolders(),
+  foldersLoading: false,
+  folderError: null,
 
   setWidth: (width) => {
     set({ width })
@@ -179,7 +207,196 @@ const useSidebarStore = create((set, get) => ({
 
   setActiveSessionId: (id) => {
     persistActiveChat(id)
+    const state = get()
+    const row = state.sessions.find((session) => session.id === id) ||
+      Object.values(state.folderBuckets).flatMap((bucket) => bucket.sessions || [])
+        .find((session) => session.id === id)
+    if (row?.folderId) {
+      const expanded = [...new Set([...state.expandedFolderIds, row.folderId])]
+      persistExpandedFolders(expanded)
+      set({ activeSessionId: id, expandedFolderIds: expanded })
+      if (!state.folderBuckets[row.folderId]?.loaded) void get().fetchFolderSessions(row.folderId).catch(() => {})
+      return
+    }
     set({ activeSessionId: id })
+  },
+
+  setFolderExpanded: (folderId, expanded) => {
+    const current = get().expandedFolderIds
+    const next = expanded
+      ? [...new Set([...current, folderId])]
+      : current.filter((id) => id !== folderId)
+    persistExpandedFolders(next)
+    set({ expandedFolderIds: next })
+    if (expanded && !get().folderBuckets[folderId]?.loaded) {
+      void get().fetchFolderSessions(folderId).catch(() => {})
+    }
+  },
+
+  createSessionFolder: async (name) => {
+    set({ folderError: null })
+    try {
+      const folder = await apiCreateSessionFolder(name)
+      const mapped = {
+        id: folder.folder_id,
+        name: folder.name,
+        createdAt: folder.created_at,
+        sessionCount: folder.session_count || 0,
+      }
+      set((s) => ({ sessionFolders: [mapped, ...s.sessionFolders] }))
+      get().setFolderExpanded(mapped.id, true)
+      return mapped
+    } catch (error) {
+      set({ folderError: String(error?.message || error) })
+      throw error
+    }
+  },
+
+  renameSessionFolder: async (folderId, name) => {
+    set({ folderError: null })
+    try {
+      const folder = await apiRenameSessionFolder(folderId, name)
+      set((s) => ({
+        sessionFolders: s.sessionFolders.map((item) => item.id === folderId
+          ? { ...item, name: folder.name }
+          : item),
+      }))
+      return folder
+    } catch (error) {
+      set({ folderError: String(error?.message || error) })
+      throw error
+    }
+  },
+
+  deleteSessionFolder: async (folderId) => {
+    set({ folderError: null })
+    try {
+      await apiDeleteSessionFolder(folderId)
+      const state = get()
+      const moved = (state.folderBuckets[folderId]?.sessions || [])
+        .map((session) => ({ ...session, folderId: null }))
+      const expanded = state.expandedFolderIds.filter((id) => id !== folderId)
+      persistExpandedFolders(expanded)
+      set((s) => {
+        const buckets = { ...s.folderBuckets }
+        delete buckets[folderId]
+        return {
+          sessionFolders: s.sessionFolders.filter((folder) => folder.id !== folderId),
+          folderBuckets: buckets,
+          expandedFolderIds: expanded,
+          sessions: isFolderMode(s.sessionKind, s.sessionQuery)
+            ? dedupeSessionRows([...moved, ...s.sessions])
+            : s.sessions.map((session) => session.folderId === folderId
+              ? { ...session, folderId: null }
+              : session),
+          unfiledCount: s.unfiledCount + moved.length,
+        }
+      })
+      get().fetchSessions()
+    } catch (error) {
+      set({ folderError: String(error?.message || error) })
+      throw error
+    }
+  },
+
+  fetchFolderSessions: async (folderId, { reset = false } = {}) => {
+    const bucket = get().folderBuckets[folderId]
+    if (bucket?.loading || (!reset && bucket?.loaded && !bucket?.hasMore)) return
+    const offset = reset ? 0 : (bucket?.offset || 0)
+    set((s) => ({
+      folderBuckets: {
+        ...s.folderBuckets,
+        [folderId]: { ...(s.folderBuckets[folderId] || {}), loading: true },
+      },
+    }))
+    try {
+      const data = await apiFetchFolderSessions(folderId, { limit: PAGE_SIZE, offset })
+      const mapped = (data.sessions || []).map(mapSession)
+      set((s) => {
+        const current = s.folderBuckets[folderId] || {}
+        const sessions = reset
+          ? mapped
+          : dedupeSessionRows([...(current.sessions || []), ...mapped])
+        const nextOffset = offset + mapped.length
+        return {
+          folderBuckets: {
+            ...s.folderBuckets,
+            [folderId]: {
+              sessions,
+              total: data.total ?? sessions.length,
+              offset: nextOffset,
+              hasMore: nextOffset < (data.total ?? sessions.length),
+              loading: false,
+              loaded: true,
+            },
+          },
+        }
+      })
+    } catch (error) {
+      set((s) => ({
+        folderError: String(error?.message || error),
+        folderBuckets: {
+          ...s.folderBuckets,
+          [folderId]: { ...(s.folderBuckets[folderId] || {}), loading: false },
+        },
+      }))
+      throw error
+    }
+  },
+
+  moveSessionToFolder: async (session, targetFolderId) => {
+    if (!session.sessionId || session.sessionKind === 'scheduler') return false
+    const sourceFolderId = session.folderId || null
+    if (sourceFolderId === targetFolderId) return false
+    const snapshot = get()
+    set((s) => {
+      const folderView = isFolderMode(s.sessionKind, s.sessionQuery)
+      const moved = { ...session, folderId: targetFolderId }
+      const buckets = { ...s.folderBuckets }
+      if (sourceFolderId && buckets[sourceFolderId]) {
+        buckets[sourceFolderId] = {
+          ...buckets[sourceFolderId],
+          sessions: (buckets[sourceFolderId].sessions || [])
+            .filter((row) => row.id !== session.id),
+        }
+      }
+      if (targetFolderId && buckets[targetFolderId]?.loaded) {
+        buckets[targetFolderId] = {
+          ...buckets[targetFolderId],
+          sessions: dedupeSessionRows([moved, ...(buckets[targetFolderId].sessions || [])]),
+        }
+      }
+      const sessions = folderView
+        ? targetFolderId === null
+          ? dedupeSessionRows([moved, ...s.sessions.filter((row) => row.id !== session.id)])
+          : s.sessions.filter((row) => row.id !== session.id)
+        : s.sessions.map((row) => row.id === session.id ? moved : row)
+      return {
+        sessions,
+        folderBuckets: buckets,
+        unfiledCount: Math.max(0, s.unfiledCount + (targetFolderId === null ? 1 : 0) - (sourceFolderId === null ? 1 : 0)),
+        sessionFolders: s.sessionFolders.map((folder) => ({
+          ...folder,
+          sessionCount: Math.max(0, folder.sessionCount
+            + (folder.id === targetFolderId ? 1 : 0)
+            - (folder.id === sourceFolderId ? 1 : 0)),
+        })),
+        folderError: null,
+      }
+    })
+    try {
+      await apiMoveSessionToFolder(session.sessionId, targetFolderId)
+      return true
+    } catch (error) {
+      set({
+        sessions: snapshot.sessions,
+        folderBuckets: snapshot.folderBuckets,
+        sessionFolders: snapshot.sessionFolders,
+        unfiledCount: snapshot.unfiledCount,
+        folderError: String(error?.message || error),
+      })
+      throw error
+    }
   },
 
   addSession: (session) => set((s) => {
@@ -270,8 +487,81 @@ const useSidebarStore = create((set, get) => ({
   fetchSessions: async () => {
     const { sessionKind, sessionQuery } = get()
     const generation = ++sessionsRequestGeneration
-    set({ sessionsLoading: true })
+    const foldersVisible = isFolderMode(sessionKind, sessionQuery)
+    set({ sessionsLoading: true, foldersLoading: foldersVisible, folderError: null })
     try {
+      if (foldersVisible) {
+        const activeLookupKey = getStoredSessionAlias() || get().activeSessionId
+        const [folderData, unfiledData, countData, activeData, activeLookupData] = await Promise.all([
+          apiFetchSessionFolders(),
+          apiFetchFolderSessions('unfiled', { limit: PAGE_SIZE, offset: 0 }),
+          apiFetchSessions({ limit: 1, offset: 0, kind: 'chat' }),
+          fetchActiveRuns().catch(() => ({ runs: [] })),
+          activeLookupKey && !activeLookupKey.startsWith('run:')
+            ? apiFetchSessions({
+                limit: 1,
+                offset: 0,
+                kind: 'chat',
+                q: activeLookupKey,
+              }).catch(() => ({ sessions: [] }))
+            : Promise.resolve({ sessions: [] }),
+        ])
+        if (generation !== sessionsRequestGeneration) return
+        const persisted = (unfiledData.sessions || []).map(mapSession)
+        const previous = get().sessions
+        const sessions = reconcileSessionRows(persisted, activeData.runs || [], previous)
+          .map((session) => ({ ...session, folderId: null }))
+        const unpersistedActive = sessions.filter((row) => row.runId && !row.sessionId).length
+        const mappedFolders = (folderData.folders || []).map((folder) => ({
+          id: folder.folder_id,
+          name: folder.name,
+          createdAt: folder.created_at,
+          sessionCount: folder.session_count || 0,
+        }))
+        const validFolderIds = new Set(mappedFolders.map((folder) => folder.id))
+        const activeLookup = (activeLookupData.sessions || [])
+          .map(mapSession)
+          .find((session) => (
+            session.id === activeLookupKey ||
+            session.sessionId === activeLookupKey
+          ))
+        const expandedFolderIds = [
+          ...new Set([
+            ...get().expandedFolderIds.filter((id) => validFolderIds.has(id)),
+            ...(activeLookup?.folderId && validFolderIds.has(activeLookup.folderId)
+              ? [activeLookup.folderId]
+              : []),
+          ]),
+        ]
+        const folderBuckets = Object.fromEntries(
+          Object.entries(get().folderBuckets).filter(([id]) => validFolderIds.has(id))
+        )
+        persistExpandedFolders(expandedFolderIds)
+        const counts = countData.counts || {
+          chat: countData.total || 0,
+          scheduler: 0,
+          all: countData.total || 0,
+        }
+        set({
+          sessions,
+          sessionFolders: mappedFolders,
+          folderBuckets,
+          expandedFolderIds,
+          unfiledCount: (folderData.unfiled_count || 0) + unpersistedActive,
+          sessionsTotal: (unfiledData.total || 0) + unpersistedActive,
+          sessionsOffset: persisted.length,
+          sessionsHasMore: persisted.length < (unfiledData.total || 0),
+          sessionCounts: {
+            chat: counts.chat + unpersistedActive,
+            scheduler: counts.scheduler,
+            all: counts.all + unpersistedActive,
+          },
+        })
+        for (const folderId of expandedFolderIds) {
+          if (!folderBuckets[folderId]?.loaded) void get().fetchFolderSessions(folderId).catch(() => {})
+        }
+        return
+      }
       const [data, activeData] = await Promise.all([
         apiFetchSessions({
           limit: PAGE_SIZE,
@@ -328,8 +618,11 @@ const useSidebarStore = create((set, get) => ({
     } catch (err) {
       if (err instanceof UnauthorizedError) return
       console.error('Failed to fetch sessions:', err)
+      set({ folderError: String(err?.message || err) })
     } finally {
-      if (generation === sessionsRequestGeneration) set({ sessionsLoading: false })
+      if (generation === sessionsRequestGeneration) {
+        set({ sessionsLoading: false, foldersLoading: false })
+      }
     }
   },
 
@@ -338,6 +631,9 @@ const useSidebarStore = create((set, get) => ({
     sessionsTotal: 0, sessionsOffset: 0, sessionsLoading: false,
     sessionsHasMore: false, sessionKind: 'chat', sessionQuery: '',
     sessionCounts: { chat: 0, scheduler: 0, all: 0 },
+    sessionFolders: [], unfiledCount: 0, folderBuckets: {},
+    expandedFolderIds: getStoredExpandedFolders(), foldersLoading: false,
+    folderError: null,
   }),
 
   fetchMoreSessions: async () => {
@@ -349,12 +645,14 @@ const useSidebarStore = create((set, get) => ({
     const generation = sessionsRequestGeneration
     set({ sessionsLoading: true })
     try {
-      const data = await apiFetchSessions({
-        limit: PAGE_SIZE,
-        offset: sessionsOffset,
-        kind: sessionKind,
-        q: sessionQuery,
-      })
+      const data = isFolderMode(sessionKind, sessionQuery)
+        ? await apiFetchFolderSessions('unfiled', {
+            limit: PAGE_SIZE, offset: sessionsOffset,
+          })
+        : await apiFetchSessions({
+            limit: PAGE_SIZE, offset: sessionsOffset,
+            kind: sessionKind, q: sessionQuery,
+          })
       if (generation !== sessionsRequestGeneration) return
       const newSessions = (data.sessions || []).map(mapSession)
       set((s) => {

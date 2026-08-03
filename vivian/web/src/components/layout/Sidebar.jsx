@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useState, useMemo } from 'react'
-import { PlusCircle, MessageSquare, CalendarClock, PanelLeftClose, PanelLeft, Trash2, ChevronDown, MoreHorizontal, RefreshCw, Settings, Search, X, Pencil, Flag, GitBranch } from 'lucide-react'
+import { PlusCircle, MessageSquare, CalendarClock, PanelLeftClose, PanelLeft, Trash2, ChevronDown, MoreHorizontal, RefreshCw, Settings, Search, X, Pencil, Flag, GitBranch, FolderInput, FolderPlus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSidebarStore from '../../stores/sidebarStore'
 import useChatStore from '../../stores/chatStore'
@@ -22,6 +22,8 @@ import SettingsPopover from '../settings/SettingsPopover'
 import CopyButton from '../shared/CopyButton'
 import safeStorage from '../../utils/safeStorage'
 import { formatSessionTime, groupSessionsByDate } from '../../utils/sessionList'
+import { folderNameForSession } from '../../utils/sessionFolders'
+import SessionFolderView from './SessionFolderView'
 
 const chatDraftCache = new Map()
 
@@ -42,7 +44,8 @@ function saveChatDraft(chatId) {
 function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
   onDelete, onRenameStart, onTagStart, renameEditingId,
-  onRenameCommit, onRenameCancel, t,
+  onRenameCommit, onRenameCancel, onMoveStart, folderName,
+  timeLabel, t,
 }) {
   const [renameValue, setRenameValue] = useState(session.name || '')
   useEffect(() => {
@@ -52,7 +55,7 @@ function SessionItem({
   const isProject = session.sessionSource === 'project'
   const isScheduler = session.sessionKind === 'scheduler'
   const SessionIcon = isScheduler ? CalendarClock : MessageSquare
-  const sessionTime = formatSessionTime(session.createdAt)
+  const sessionTime = timeLabel ?? formatSessionTime(session.createdAt)
   const statusLabel = session.runStatus === 'waiting_user'
     ? 'ACTION'
     : session.runStatus === 'running'
@@ -85,6 +88,11 @@ function SessionItem({
         transition: 'background 150ms ease',
       }}
       onClick={() => { if (!editing) onSelect(session) }}
+      onDoubleClick={(event) => {
+        if (editing || !session.sessionId || event.target.closest('button, input, [role="menu"], [data-session-control]')) return
+        event.stopPropagation()
+        onRenameStart(session)
+      }}
       onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg-elevated)' }}
       onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
     >
@@ -208,20 +216,22 @@ function SessionItem({
                   overflow: 'hidden',
                 }}
               >
-                <button
-                  className="flex items-center gap-2 px-3 py-2 w-full"
-                  style={{ ...menuItemStyle, color: 'var(--text-primary)' }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onMenuToggle(null)
-                    onRenameStart(session)
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                >
-                  <Pencil size={13} strokeWidth={1.5} />
-                  {t('sidebar.rename')}
-                </button>
+                {session.sessionId && (
+                  <button
+                    className="flex items-center gap-2 px-3 py-2 w-full"
+                    style={{ ...menuItemStyle, color: 'var(--text-primary)' }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onMenuToggle(null)
+                      onRenameStart(session)
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <Pencil size={13} strokeWidth={1.5} />
+                    {t('sidebar.rename')}
+                  </button>
+                )}
                 <button
                   className="flex items-center gap-2 px-3 py-2 w-full"
                   style={{ ...menuItemStyle, color: 'var(--text-primary)' }}
@@ -236,6 +246,22 @@ function SessionItem({
                   <Flag size={13} strokeWidth={1.5} />
                   {session.tag ? t('sidebar.changeTag') : t('sidebar.setTag')}
                 </button>
+                {!isScheduler && session.sessionId && (
+                  <button
+                    className="flex items-center gap-2 px-3 py-2 w-full"
+                    style={{ ...menuItemStyle, color: 'var(--text-primary)' }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onMenuToggle(null)
+                      onMoveStart(session, e.currentTarget.getBoundingClientRect())
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <FolderInput size={13} strokeWidth={1.5} />
+                    {t('sidebar.moveToFolder', { defaultValue: 'Move to folder' })}
+                  </button>
+                )}
                 <div style={{ height: 1, background: 'var(--border-subtle)' }} />
                 <button
                   className="flex items-center gap-2 px-3 py-2 w-full"
@@ -270,8 +296,23 @@ function SessionItem({
           {session.schedulerContext.job_name}
         </div>
       )}
+      {folderName && !editing && (
+        <div
+          className="truncate"
+          style={{
+            paddingLeft: 19,
+            color: 'var(--text-dim)',
+            fontSize: 11,
+            fontWeight: 300,
+            minWidth: 0,
+          }}
+          title={`${folderName} / ${session.name}`}
+        >
+          {folderName} / {session.name}
+        </div>
+      )}
       {session.tag && !editing && (
-        <div className="flex items-center gap-1" style={{ paddingLeft: 19 }}>
+        <div data-session-control className="flex items-center gap-1" style={{ paddingLeft: 19 }}>
           <span
             className="inline-flex items-center gap-1 px-2 uppercase"
             style={{
@@ -416,6 +457,67 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
   )
 }
 
+function MovePopover({ session, folders, onClose, onMove }) {
+  const { t } = useTranslation()
+  const options = [{ id: null, name: t('sidebar.unfiled', { defaultValue: 'Unfiled' }) }, ...folders]
+  return (
+    <div
+      role="menu"
+      onClick={(event) => event.stopPropagation()}
+      style={{
+        background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+        borderRadius: 4, minWidth: 210, maxWidth: 'calc(100vw - 24px)',
+        maxHeight: 280, overflowY: 'auto', padding: 4,
+      }}
+    >
+      {options.map((folder) => {
+        const current = (session.folderId || null) === folder.id
+        return (
+          <button
+            key={folder.id || 'unfiled'}
+            type="button"
+            role="menuitem"
+            disabled={current}
+            className="flex items-center gap-2 px-3 py-2 w-full min-w-0"
+            onClick={() => { if (!current) onMove(folder.id) }}
+            style={{
+              background: current ? 'var(--bg-surface)' : 'transparent',
+              border: 'none', borderLeft: `2px solid ${current ? 'var(--blue)' : 'transparent'}`,
+              borderRadius: 2, color: current ? 'var(--text-primary)' : 'var(--text-secondary)',
+              cursor: current ? 'default' : 'pointer', fontSize: 12, textAlign: 'left',
+            }}
+          >
+            <FolderInput size={13} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+            <span className="truncate">{folder.name}</span>
+          </button>
+        )
+      })}
+      <button
+        type="button"
+        className="px-3 py-2 w-full"
+        onClick={onClose}
+        style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 11 }}
+      >
+        {t('confirm.cancel', { defaultValue: 'Cancel' })}
+      </button>
+    </div>
+  )
+}
+
+function updateSessionCollections(state, sessionId, data) {
+  return {
+    sessions: state.sessions.map((row) => row.id === sessionId ? { ...row, ...data } : row),
+    folderBuckets: Object.fromEntries(
+      Object.entries(state.folderBuckets).map(([folderId, bucket]) => [folderId, {
+        ...bucket,
+        sessions: (bucket.sessions || []).map((row) =>
+          row.id === sessionId ? { ...row, ...data } : row
+        ),
+      }])
+    ),
+  }
+}
+
 export default function Sidebar() {
   const { t } = useTranslation()
   const width = useSidebarStore((s) => s.width)
@@ -431,6 +533,9 @@ export default function Sidebar() {
   const sessionKind = useSidebarStore((s) => s.sessionKind)
   const sessionQuery = useSidebarStore((s) => s.sessionQuery)
   const sessionCounts = useSidebarStore((s) => s.sessionCounts)
+  const sessionFolders = useSidebarStore((s) => s.sessionFolders)
+  const folderBuckets = useSidebarStore((s) => s.folderBuckets)
+  const moveSessionToFolder = useSidebarStore((s) => s.moveSessionToFolder)
   const setSessionKind = useSidebarStore((s) => s.setSessionKind)
   const setSessionQuery = useSidebarStore((s) => s.setSessionQuery)
   const clearMessages = useChatStore((s) => s.clearMessages)
@@ -451,21 +556,28 @@ export default function Sidebar() {
   const [renameEditingId, setRenameEditingId] = useState(null)
   const [tagPopoverSession, setTagPopoverSession] = useState(null)
   const [tagPopoverTop, setTagPopoverTop] = useState(120)
+  const [movePopoverSession, setMovePopoverSession] = useState(null)
+  const [movePopoverTop, setMovePopoverTop] = useState(120)
+  const [creatingFolder, setCreatingFolder] = useState(false)
   const tagPopoverRef = useRef(null)
+  const movePopoverRef = useRef(null)
 
   const availableTags = useMemo(() => {
     const seen = new Set()
     const out = []
-    for (const s of sessions) {
+    const bucketSessions = Object.values(folderBuckets)
+      .flatMap((bucket) => bucket.sessions || [])
+    for (const s of [...sessions, ...bucketSessions]) {
       if (s.tag && !seen.has(s.tag)) {
         seen.add(s.tag)
         out.push(s.tag)
       }
     }
     return out
-  }, [sessions])
+  }, [sessions, folderBuckets])
 
   const groupedSessions = useMemo(() => groupSessionsByDate(sessions), [sessions])
+  const folderView = sessionKind === 'chat' && !sessionQuery
 
   useEffect(() => {
     fetchSessions()
@@ -509,19 +621,30 @@ export default function Sidebar() {
     return () => document.removeEventListener('mousedown', handler)
   }, [tagPopoverSession])
 
-  const handleRenameStart = (session) => setRenameEditingId(session.id)
+  useEffect(() => {
+    if (!movePopoverSession) return undefined
+    const handler = (event) => {
+      if (movePopoverRef.current && !movePopoverRef.current.contains(event.target)) {
+        setMovePopoverSession(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [movePopoverSession])
+
+  const handleRenameStart = (session) => {
+    if (session.sessionId) setRenameEditingId(session.id)
+  }
   const handleRenameCancel = () => setRenameEditingId(null)
   const handleRenameCommit = async (session, nextTitle) => {
     const trimmed = (nextTitle || '').trim()
     setRenameEditingId(null)
-    if (!trimmed || trimmed === session.name) return
+    if (!session.sessionId || !trimmed || trimmed === session.name) return
     try {
       await apiRenameSession(session.sessionId || session.id, trimmed)
-      useSidebarStore.setState((s) => ({
-        sessions: s.sessions.map((row) =>
-          row.id === session.id ? { ...row, name: trimmed, customTitle: trimmed } : row
-        ),
-      }))
+      useSidebarStore.setState((state) =>
+        updateSessionCollections(state, session.id, { name: trimmed, customTitle: trimmed })
+      )
     } catch (err) {
       showConfirmDialog({
         title: t('sidebar.renameFailed'),
@@ -538,11 +661,27 @@ export default function Sidebar() {
     setTagPopoverSession(session)
   }
   const handleTagSaved = (session, nextTag) => {
-    useSidebarStore.setState((s) => ({
-      sessions: s.sessions.map((row) =>
-        row.id === session.id ? { ...row, tag: nextTag } : row
-      ),
-    }))
+    useSidebarStore.setState((state) =>
+      updateSessionCollections(state, session.id, { tag: nextTag })
+    )
+  }
+  const handleMoveStart = (session, anchorRect) => {
+    setMovePopoverTop(Math.max(60, Math.min(window.innerHeight - 300, anchorRect?.bottom + 4 || 120)))
+    setMovePopoverSession(session)
+  }
+  const handleMoveSession = async (folderId) => {
+    const session = movePopoverSession
+    setMovePopoverSession(null)
+    if (!session) return
+    try {
+      await moveSessionToFolder(session, folderId)
+    } catch (error) {
+      useToastStore.getState().pushToast({
+        level: 'error',
+        title: t('sidebar.moveFailed', { defaultValue: 'Move failed' }),
+        body: String(error?.message || error),
+      })
+    }
   }
 
   // Infinite scroll: load more when scrolled near bottom
@@ -686,14 +825,15 @@ export default function Sidebar() {
 
   const restoredActiveRef = useRef(false)
   useEffect(() => {
-    if (restoredActiveRef.current || !activeSessionId || sessions.length === 0) return
-    const active = sessions.find((session) => session.id === activeSessionId)
+    const loadedFolderSessions = Object.values(folderBuckets).flatMap((bucket) => bucket.sessions || [])
+    if (restoredActiveRef.current || !activeSessionId || (sessions.length === 0 && loadedFolderSessions.length === 0)) return
+    const active = [...sessions, ...loadedFolderSessions].find((session) => session.id === activeSessionId)
     if (!active) return
     restoredActiveRef.current = true
     if (useChatStore.getState().messages.length === 0) {
       handleSelectSession(active)
     }
-  }, [activeSessionId, sessions]) // handleSelectSession intentionally uses the latest render state
+  }, [activeSessionId, sessions, folderBuckets]) // handleSelectSession intentionally uses the latest render state
 
   const handleDeleteSession = (e, session) => {
     e.stopPropagation()
@@ -707,14 +847,25 @@ export default function Sidebar() {
           await apiDeleteSession(session.sessionId || session.id)
         } catch (err) {
           console.error('Failed to delete session:', err)
+          return
         }
         safeStorage.removeItem(`vivian-rewind:${session.sessionId || session.id}`)
         const store = useSidebarStore.getState()
-        const newSessions = store.sessions.filter((s) => s.id !== session.id)
         const kind = session.sessionKind || 'chat'
+        const nextBuckets = Object.fromEntries(
+          Object.entries(store.folderBuckets).map(([folderId, bucket]) => [folderId, {
+            ...bucket,
+            sessions: (bucket.sessions || []).filter((row) => row.id !== session.id),
+          }])
+        )
         useSidebarStore.setState({
-          sessions: newSessions,
-          sessionsTotal: Math.max(0, store.sessionsTotal - 1),
+          sessions: store.sessions.filter((row) => row.id !== session.id),
+          folderBuckets: nextBuckets,
+          sessionsTotal: Math.max(0, store.sessionsTotal - (folderView && session.folderId ? 0 : 1)),
+          unfiledCount: Math.max(0, store.unfiledCount - (!session.folderId && kind === 'chat' ? 1 : 0)),
+          sessionFolders: store.sessionFolders.map((folder) => folder.id === session.folderId
+            ? { ...folder, sessionCount: Math.max(0, folder.sessionCount - 1) }
+            : folder),
           sessionCounts: {
             ...store.sessionCounts,
             [kind]: Math.max(0, store.sessionCounts[kind] - 1),
@@ -730,6 +881,29 @@ export default function Sidebar() {
       },
     })
   }
+
+  const renderSession = (session, { wrapperProps = {}, timeLabel } = {}) => (
+    <div key={session.id} {...wrapperProps} style={{ touchAction: 'pan-y', minWidth: 0 }}>
+      <SessionItem
+        session={session}
+        isActive={session.id === activeSessionId}
+        openMenuId={openMenuId}
+        menuRef={menuRef}
+        onSelect={handleSelectSession}
+        onMenuToggle={setOpenMenuId}
+        onDelete={handleDeleteSession}
+        onRenameStart={handleRenameStart}
+        onTagStart={handleTagStart}
+        onMoveStart={handleMoveStart}
+        renameEditingId={renameEditingId}
+        onRenameCommit={handleRenameCommit}
+        onRenameCancel={handleRenameCancel}
+        folderName={sessionQuery ? folderNameForSession(session, sessionFolders) : null}
+        timeLabel={timeLabel}
+        t={t}
+      />
+    </div>
+  )
 
   return (
     <aside
@@ -958,6 +1132,21 @@ export default function Sidebar() {
                 </button>
               )}
             </div>
+            {sessionKind === 'chat' && !searchQuery && (
+              <button
+                type="button"
+                aria-label={t('sidebar.newFolder', { defaultValue: 'New folder' })}
+                title={t('sidebar.newFolder', { defaultValue: 'New folder' })}
+                onClick={() => setCreatingFolder(true)}
+                style={{
+                  background: 'transparent', border: 'none', color: 'var(--text-dim)',
+                  cursor: 'pointer', padding: 4, display: 'flex', flexShrink: 0,
+                  transition: 'color 150ms ease',
+                }}
+              >
+                <FolderPlus size={14} strokeWidth={1.5} />
+              </button>
+            )}
             <button
               style={{
                 background: 'transparent',
@@ -996,9 +1185,24 @@ export default function Sidebar() {
             </div>
           )}
 
+          {movePopoverSession && (
+            <div
+              className="fixed"
+              ref={movePopoverRef}
+              style={{ top: movePopoverTop, left: 12, zIndex: 85 }}
+            >
+              <MovePopover
+                session={movePopoverSession}
+                folders={sessionFolders}
+                onClose={() => setMovePopoverSession(null)}
+                onMove={handleMoveSession}
+              />
+            </div>
+          )}
+
           {/* Session List */}
           <div className="flex-1 overflow-y-auto py-1" ref={listRef} onScroll={handleScroll}>
-            {sessions.length === 0 && !sessionsLoading && !sessionQuery && (
+            {sessions.length === 0 && (!folderView || sessionFolders.length === 0) && !sessionsLoading && !sessionQuery && (
               <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
                 {sessionKind === 'scheduler'
                   ? t('sidebar.noScheduledSessions')
@@ -1025,75 +1229,54 @@ export default function Sidebar() {
               </div>
             )}
 
-            {groupedSessions.map((group) => (
-              <div key={group.key}>
-                <div
-                  className="sticky"
-                  style={{
-                    top: 0,
-                    zIndex: 2,
-                    background: 'var(--bg-surface)',
-                    color: 'var(--text-dim)',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    letterSpacing: '0.06em',
-                    padding: '7px 12px 3px',
-                  }}
-                >
-                  {group.key === 'today'
-                    ? t('sidebar.today')
-                    : group.key === 'yesterday'
-                      ? t('sidebar.yesterday')
-                      : group.key === 'earlier'
-                        ? t('sidebar.more')
-                        : group.key}
-                </div>
-                {group.sessions.map((session) => (
-                  <SessionItem
-                    key={session.id}
-                    session={session}
-                    isActive={session.id === activeSessionId}
-                    openMenuId={openMenuId}
-                    menuRef={menuRef}
-                    onSelect={handleSelectSession}
-                    onMenuToggle={setOpenMenuId}
-                    onDelete={handleDeleteSession}
-                    onRenameStart={handleRenameStart}
-                    onTagStart={handleTagStart}
-                    renameEditingId={renameEditingId}
-                    onRenameCommit={handleRenameCommit}
-                    onRenameCancel={handleRenameCancel}
-                    t={t}
-                  />
+            {folderView ? (
+              <SessionFolderView
+                activeSessionId={activeSessionId}
+                creating={creatingFolder}
+                listRef={listRef}
+                onCreatingChange={setCreatingFolder}
+                renderSession={renderSession}
+                sessions={sessions}
+                sessionsHasMore={sessionsHasMore}
+                sessionsLoading={sessionsLoading}
+                onLoadMoreUnfiled={fetchMoreSessions}
+              />
+            ) : (
+              <>
+                {groupedSessions.map((group) => (
+                  <div key={group.key}>
+                    <div
+                      className="sticky"
+                      style={{
+                        top: 0, zIndex: 2, background: 'var(--bg-surface)',
+                        color: 'var(--text-dim)', fontSize: 11, fontWeight: 600,
+                        letterSpacing: '0.06em', padding: '7px 12px 3px',
+                      }}
+                    >
+                      {group.key === 'today' ? t('sidebar.today')
+                        : group.key === 'yesterday' ? t('sidebar.yesterday')
+                          : group.key === 'earlier' ? t('sidebar.more') : group.key}
+                    </div>
+                    {group.sessions.map((session) => renderSession(session))}
+                  </div>
                 ))}
-              </div>
-            ))}
-
-            {sessionsHasMore && (
-              <button
-                className="flex items-center justify-center gap-1 px-3 py-2 w-full"
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-dim)',
-                  cursor: sessionsLoading ? 'default' : 'pointer',
-                  fontSize: 13,
-                  transition: 'color 150ms ease',
-                }}
-                onClick={fetchMoreSessions}
-                disabled={sessionsLoading}
-                onMouseEnter={(e) => { if (!sessionsLoading) e.currentTarget.style.color = 'var(--text-secondary)' }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-              >
-                {sessionsLoading ? (
-                  t('sidebar.loading')
-                ) : (
-                  <>
-                    <ChevronDown size={13} strokeWidth={1.5} />
-                    {t('sidebar.loadMore')}
-                  </>
+                {sessionsHasMore && (
+                  <button
+                    className="flex items-center justify-center gap-1 px-3 py-2 w-full"
+                    style={{
+                      background: 'transparent', border: 'none', color: 'var(--text-dim)',
+                      cursor: sessionsLoading ? 'default' : 'pointer', fontSize: 13,
+                      transition: 'color 150ms ease',
+                    }}
+                    onClick={fetchMoreSessions}
+                    disabled={sessionsLoading}
+                  >
+                    {sessionsLoading ? t('sidebar.loading') : (
+                      <><ChevronDown size={13} strokeWidth={1.5} />{t('sidebar.loadMore')}</>
+                    )}
+                  </button>
                 )}
-              </button>
+              </>
             )}
           </div>
         </>
