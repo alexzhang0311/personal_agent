@@ -90,6 +90,7 @@ export function useSSE() {
         firstPrompt: message,
         createdAt: Date.now(),
         sessionSource: 'project',
+        sessionKind: 'chat',
         runStatus: 'running',
       })
       activeSessionId = draftId

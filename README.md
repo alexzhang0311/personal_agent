@@ -237,7 +237,21 @@ npm run preview  预览 dist
 5. 生成 dist/vivian-<version>-<platform>-<timestamp>.tar.gz
 ```
 
-该包不包含 Python / npm 离线依赖，目标服务器需要联网安装依赖。
+该包不包含 Python / npm 离线依赖，目标服务器需要联网安装依赖或复用已有依赖环境。
+
+这也是增量更新的推荐方式：如果生产环境已经有稳定的 Python 虚拟环境，并且本次没有修改 `requirements.txt`，不要每次都重新打 Python 依赖包。直接使用默认打包即可：
+
+```bash
+./pack.sh
+```
+
+如果前端已经提前 build 好，也可以跳过前端构建：
+
+```bash
+./pack.sh --skip-build
+```
+
+此时生产环境只需要覆盖 `api/`、`bin/`、`web/dist/` 和 `requirements.txt`，保留生产 `api/config.yaml`，然后重启服务。
 
 ### 5.2 离线生产包
 
@@ -443,15 +457,25 @@ npm 运行期依赖有变化               用新包 lib/npm-cache 离线安装 
 
 联网构建机：
 
+如果 `requirements.txt` 没有变化，推荐使用不带依赖的增量包：
+
+```bash
+./pack.sh
+```
+
+如果前端已经 build 好：
+
+```bash
+./pack.sh --skip-build
+```
+
+只有当 `requirements.txt` 发生变化，或需要重新准备生产离线安装源时，才使用 `--include-dependency`：
+
 ```bash
 ./pack.sh --include-dependency --platform linux --glibc 2_17 --python-version 3.12
 ```
 
-如果确认依赖没有变化，也可以：
-
-```bash
-./pack.sh --platform linux --glibc 2_17 --python-version 3.12
-```
+当前 `pack.sh` 不支持单独“只打 Python 依赖”或“只打 npm 依赖”的开关。依赖打包由 `--include-dependency` 统一控制；不传该参数就不会生成 `lib/py` 和 `lib/npm-cache`。
 
 ### 7.2 生产机解压到新目录
 

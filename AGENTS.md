@@ -13,6 +13,7 @@
 - Root `VERSION` is the only source of truth; `config.yaml` must not contain the application version. Do not bump versions on normal work branches; update it only while preparing a `develop` release or a `hotfix`.
 - Add user-visible changes to `CHANGELOG.md` under `[Unreleased]` and run `python3 scripts/check_version.py` before handoff.
 - Before changing files, inspect the current branch and dirty worktree. Preserve unrelated user changes and do not switch branches when doing so could overwrite them.
+- Any externally consumed API contract change must be disclosed to the repository maintainer before implementation and requires explicit confirmation after compatibility impact, affected callers, migration, and rollback have been assessed. This includes REST request/response schemas, SSE events or payloads, WebSocket frames, field types or semantics, status codes, error formats, headers, and authentication behavior. Updating Vivian's own client does not waive this requirement.
 
 ## WebUI design
 

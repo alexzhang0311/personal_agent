@@ -36,6 +36,7 @@ from api.services.audit_log import AuditEntry, get_audit_logger
 from api.services.config import get_settings
 from api.services.scheduler.job_store import JobStore
 from api.services.scheduler.run_history import RunHistoryStore
+from api.services.session_origins import record_scheduler_session, session_id_from_event
 from api.services.scheduler.shared import (
     build_trigger,
     get_commands_dir,
@@ -283,9 +284,33 @@ class SchedulerDaemon:
                     with open(path, "a") as f:
                         f.write(line)
 
+                recorded_session_ids: set[str] = set()
+
                 async def emit(event_type: str, data: dict) -> None:
                     nonlocal result_payload
                     await asyncio.to_thread(_write_event, run_output_path, json.dumps({"event": event_type, "data": data}) + "\n")
+                    session_id = session_id_from_event(event_type, data)
+                    if (
+                        job_type == "scheduled_agent"
+                        and session_id
+                        and session_id not in recorded_session_ids
+                    ):
+                        try:
+                            await asyncio.to_thread(
+                                record_scheduler_session,
+                                cwd,
+                                session_id=session_id,
+                                job_id=job_def.id,
+                                job_name=job_def.name,
+                                run_id=run_id,
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Failed to record scheduler origin for session {}",
+                                session_id,
+                            )
+                        else:
+                            recorded_session_ids.add(session_id)
                     if event_type == "result":
                         result_payload = data
 

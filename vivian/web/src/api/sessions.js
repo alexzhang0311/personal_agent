@@ -2,11 +2,19 @@ import { getAuthHeaders, handleAPIResponse } from './client'
 
 const BASE_URL = '/api'
 
-export async function fetchSessions(limit = 20, offset = 0, source = 'project') {
+export async function fetchSessions({
+  limit = 20,
+  offset = 0,
+  source = 'project',
+  kind = 'all',
+  q = '',
+} = {}) {
   const params = new URLSearchParams()
   params.set('limit', String(limit))
   params.set('offset', String(offset))
   params.set('source', source)
+  params.set('kind', kind)
+  if (q.trim()) params.set('q', q.trim())
   const res = await fetch(`${BASE_URL}/agent/sessions?${params}`, {
     headers: { ...getAuthHeaders() },
   })
@@ -17,6 +25,65 @@ export async function fetchActiveRuns() {
   const res = await fetch(`${BASE_URL}/agent/runs/active`, {
     headers: { ...getAuthHeaders() },
   })
+  return handleAPIResponse(res)
+}
+
+export async function fetchSessionFolders() {
+  const res = await fetch(`${BASE_URL}/agent/session-folders`, {
+    headers: { ...getAuthHeaders() },
+  })
+  return handleAPIResponse(res)
+}
+
+export async function createSessionFolder(name) {
+  const res = await fetch(`${BASE_URL}/agent/session-folders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ name }),
+  })
+  return handleAPIResponse(res)
+}
+
+export async function renameSessionFolder(folderId, name) {
+  const res = await fetch(
+    `${BASE_URL}/agent/session-folders/${encodeURIComponent(folderId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ name }),
+    }
+  )
+  return handleAPIResponse(res)
+}
+
+export async function deleteSessionFolder(folderId) {
+  const res = await fetch(
+    `${BASE_URL}/agent/session-folders/${encodeURIComponent(folderId)}`,
+    { method: 'DELETE', headers: { ...getAuthHeaders() } }
+  )
+  return handleAPIResponse(res)
+}
+
+export async function fetchFolderSessions(folderId, { limit = 20, offset = 0 } = {}) {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  params.set('offset', String(offset))
+  const res = await fetch(
+    `${BASE_URL}/agent/session-folders/${encodeURIComponent(folderId)}/sessions?${params}`,
+    { headers: { ...getAuthHeaders() } }
+  )
+  return handleAPIResponse(res)
+}
+
+export async function moveSessionToFolder(sessionId, folderId) {
+  const res = await fetch(
+    `${BASE_URL}/agent/sessions/${encodeURIComponent(sessionId)}/folder`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ folder_id: folderId ?? null }),
+    }
+  )
   return handleAPIResponse(res)
 }
 

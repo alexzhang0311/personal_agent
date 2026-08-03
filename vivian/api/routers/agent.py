@@ -15,7 +15,7 @@ from claude_agent_sdk import (
     tag_session as sdk_tag_session,
 )
 from claude_agent_sdk._internal.sessions import _canonicalize_path, _get_project_dir
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import TypeAdapter, ValidationError
 
@@ -30,7 +30,13 @@ from ..models.agent import (
     RenameRequest,
     RewindRequest,
     RewindResponse,
+    SchedulerSessionContext,
+    SessionFolderListResponse,
+    SessionFolderMoveRequest,
+    SessionFolderNameRequest,
+    SessionFolderResponse,
     SessionInfoResponse,
+    SessionKindCounts,
     SessionListResponse,
     SessionMessageResponse,
     SessionMessagesResponse,
@@ -48,6 +54,18 @@ from ..services.auth import authenticate_raw_token, decode_jwt, get_current_user
 from ..services.claude_sdk.client import agent_run
 from ..services.claude_sdk.options import build_agent_options
 from ..services.claude_sdk.permission_coordinator import registry
+from ..services.session_folders import (
+    SessionFolderConflictError,
+    SessionFolderError,
+    SessionFolderNotFoundError,
+    clear_session_folder_assignment,
+    create_session_folder,
+    delete_session_folder,
+    load_session_folders,
+    move_session_to_folder,
+    rename_session_folder,
+)
+from ..services.session_origins import delete_session_origin, load_session_origins
 from ..services.user_store import UserRecord
 from ..metrics import AGENT_RUNS_FINISHED, AGENT_RUNS_STARTED
 
@@ -388,44 +406,275 @@ async def run_agent_stream(
     return StreamingResponse(managed_stream(), media_type="text/event-stream")
 
 
+def _assigned_folder_id(folder_state, session_id: str) -> str | None:
+    folder_id = folder_state.assignments.get(session_id)
+    return folder_id if folder_id in folder_state.folders else None
+
+
+def _session_info_response(
+    session,
+    *,
+    session_kind: str,
+    scheduler_context: dict[str, str] | None,
+    folder_id: str | None,
+) -> SessionInfoResponse:
+    return SessionInfoResponse(
+        session_id=session.session_id,
+        summary=session.summary,
+        last_modified=session.last_modified,
+        file_size=session.file_size,
+        custom_title=session.custom_title,
+        first_prompt=session.first_prompt,
+        git_branch=session.git_branch,
+        cwd=session.cwd,
+        session_source="project",
+        tag=getattr(session, "tag", None),
+        session_kind=session_kind,
+        scheduler_context=(
+            SchedulerSessionContext(**scheduler_context)
+            if scheduler_context else None
+        ),
+        folder_id=folder_id,
+    )
+
+
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_agent_sessions(
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     source: Literal["all", "project", "global"] = "all",  # deprecated — ignored
+    kind: Literal["all", "chat", "scheduler"] = "all",
+    q: str | None = Query(default=None, max_length=200),
     user: UserRecord | None = Depends(get_current_user),
 ):
-    """List past sessions from this project workspace (paginated).
+    """List and search past sessions from this project workspace.
 
     The ``source`` query parameter is accepted for backwards compatibility
     but ignored — every response now contains only ``<work_dir>/<username>``
-    sessions, tagged as ``"project"``.
+    sessions, tagged as ``"project"``. Source/search filtering happens before
+    pagination so older matching sessions are discoverable.
     """
     del source  # legacy parameter, kept for client compat
     cwd = get_user_workspace(user)
     raw = list_sessions(directory=cwd)
+    origins = load_session_origins(cwd)
+    folder_state = load_session_folders(cwd)
+    needle = (q or "").strip().casefold()
+    enriched: list[tuple[object, str, dict[str, str] | None, str | None]] = []
+    for session in raw:
+        scheduler_context = origins.get(session.session_id)
+        session_kind = "scheduler" if scheduler_context else "chat"
+        if needle:
+            values = (
+                session.session_id,
+                session.custom_title,
+                session.first_prompt,
+                session.summary,
+                getattr(session, "tag", None),
+                scheduler_context.get("job_name") if scheduler_context else None,
+            )
+            if not any(needle in str(value).casefold() for value in values if value):
+                continue
+        folder_id = (
+            _assigned_folder_id(folder_state, session.session_id)
+            if session_kind == "chat" else None
+        )
+        enriched.append((session, session_kind, scheduler_context, folder_id))
 
-    total = len(raw)
-    page = raw[offset : offset + limit]
+    counts = SessionKindCounts(
+        chat=sum(1 for _, session_kind, _, _ in enriched if session_kind == "chat"),
+        scheduler=sum(1 for _, session_kind, _, _ in enriched if session_kind == "scheduler"),
+        all=len(enriched),
+    )
+    filtered = (
+        enriched
+        if kind == "all"
+        else [row for row in enriched if row[1] == kind]
+    )
+    total = len(filtered)
+    page = filtered[offset : offset + limit]
     return SessionListResponse(
         sessions=[
-            SessionInfoResponse(
-                session_id=s.session_id,
-                summary=s.summary,
-                last_modified=s.last_modified,
-                file_size=s.file_size,
-                custom_title=s.custom_title,
-                first_prompt=s.first_prompt,
-                git_branch=s.git_branch,
-                cwd=s.cwd,
-                session_source="project",
-                tag=getattr(s, "tag", None),
+            _session_info_response(
+                s,
+                session_kind=session_kind,
+                scheduler_context=scheduler_context,
+                folder_id=folder_id,
             )
-            for s in page
+            for s, session_kind, scheduler_context, folder_id in page
         ],
         total=total,
         limit=limit,
         offset=offset,
+        counts=counts,
+    )
+
+
+def _folder_http_error(exc: SessionFolderError) -> HTTPException:
+    if isinstance(exc, SessionFolderNotFoundError):
+        return HTTPException(404, str(exc))
+    if isinstance(exc, SessionFolderConflictError):
+        return HTTPException(409, str(exc))
+    return HTTPException(400, str(exc))
+
+
+@router.get("/session-folders", response_model=SessionFolderListResponse)
+async def list_agent_session_folders(
+    user: UserRecord | None = Depends(get_current_user),
+):
+    """List single-level folders and counts for ordinary chat sessions."""
+    cwd = get_user_workspace(user)
+    sessions = list_sessions(directory=cwd)
+    origins = load_session_origins(cwd)
+    state = load_session_folders(cwd)
+    chat_ids = {
+        session.session_id
+        for session in sessions
+        if session.session_id not in origins
+    }
+    counts = {folder_id: 0 for folder_id in state.folders}
+    unfiled_count = 0
+    for session_id in chat_ids:
+        folder_id = _assigned_folder_id(state, session_id)
+        if folder_id is None:
+            unfiled_count += 1
+        else:
+            counts[folder_id] += 1
+    folders = sorted(
+        state.folders.values(),
+        key=lambda folder: folder.created_at,
+        reverse=True,
+    )
+    return SessionFolderListResponse(
+        folders=[
+            SessionFolderResponse(
+                folder_id=folder.folder_id,
+                name=folder.name,
+                created_at=folder.created_at,
+                session_count=counts[folder.folder_id],
+            )
+            for folder in folders
+        ],
+        unfiled_count=unfiled_count,
+    )
+
+
+@router.post("/session-folders", response_model=SessionFolderResponse, status_code=201)
+async def create_agent_session_folder(
+    req: SessionFolderNameRequest,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    cwd = get_user_workspace(user)
+    try:
+        folder = create_session_folder(cwd, req.name)
+    except SessionFolderError as exc:
+        raise _folder_http_error(exc) from exc
+    get_audit_logger().append(AuditEntry(
+        actor=user.username if user else "anonymous",
+        action="session_folder.created",
+        target=folder.folder_id,
+        details={"name": folder.name},
+    ))
+    return SessionFolderResponse(
+        folder_id=folder.folder_id,
+        name=folder.name,
+        created_at=folder.created_at,
+        session_count=0,
+    )
+
+
+@router.patch("/session-folders/{folder_id}", response_model=SessionFolderResponse)
+async def rename_agent_session_folder(
+    folder_id: str,
+    req: SessionFolderNameRequest,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    cwd = get_user_workspace(user)
+    try:
+        folder = rename_session_folder(cwd, folder_id, req.name)
+    except SessionFolderError as exc:
+        raise _folder_http_error(exc) from exc
+    state = load_session_folders(cwd)
+    origins = load_session_origins(cwd)
+    chat_ids = {
+        session.session_id
+        for session in list_sessions(directory=cwd)
+        if session.session_id not in origins
+    }
+    session_count = sum(
+        1
+        for session_id in chat_ids
+        if _assigned_folder_id(state, session_id) == folder_id
+    )
+    get_audit_logger().append(AuditEntry(
+        actor=user.username if user else "anonymous",
+        action="session_folder.renamed",
+        target=folder_id,
+        details={"name": folder.name},
+    ))
+    return SessionFolderResponse(
+        folder_id=folder.folder_id,
+        name=folder.name,
+        created_at=folder.created_at,
+        session_count=session_count,
+    )
+
+
+@router.delete("/session-folders/{folder_id}")
+async def delete_agent_session_folder(
+    folder_id: str,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    cwd = get_user_workspace(user)
+    try:
+        unfiled_count = delete_session_folder(cwd, folder_id)
+    except SessionFolderError as exc:
+        raise _folder_http_error(exc) from exc
+    get_audit_logger().append(AuditEntry(
+        actor=user.username if user else "anonymous",
+        action="session_folder.deleted",
+        target=folder_id,
+        details={"unfiled_count": unfiled_count},
+    ))
+    return {"status": "ok", "unfiled_count": unfiled_count}
+
+
+@router.get("/session-folders/{folder_id}/sessions", response_model=SessionListResponse)
+async def list_agent_session_folder_sessions(
+    folder_id: str,
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    user: UserRecord | None = Depends(get_current_user),
+):
+    """Page ordinary chat sessions assigned to one folder or ``unfiled``."""
+    cwd = get_user_workspace(user)
+    state = load_session_folders(cwd)
+    if folder_id != "unfiled" and folder_id not in state.folders:
+        raise HTTPException(404, "Session folder not found")
+    origins = load_session_origins(cwd)
+    matching = []
+    for session in list_sessions(directory=cwd):
+        if session.session_id in origins:
+            continue
+        assigned = _assigned_folder_id(state, session.session_id)
+        if (folder_id == "unfiled" and assigned is None) or assigned == folder_id:
+            matching.append(session)
+    total = len(matching)
+    page = matching[offset : offset + limit]
+    return SessionListResponse(
+        sessions=[
+            _session_info_response(
+                session,
+                session_kind="chat",
+                scheduler_context=None,
+                folder_id=_assigned_folder_id(state, session.session_id),
+            )
+            for session in page
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+        counts=SessionKindCounts(chat=total, all=total),
     )
 
 
@@ -533,6 +782,14 @@ async def delete_agent_session(session_id: str, user: UserRecord | None = Depend
         raise HTTPException(404, "Session file not found")
 
     session_file.unlink()
+    try:
+        delete_session_origin(cwd, session_id)
+    except Exception:
+        logger.exception("Failed to delete session origin metadata for %s", session_id)
+    try:
+        clear_session_folder_assignment(cwd, session_id)
+    except Exception:
+        logger.exception("Failed to clear session folder metadata for %s", session_id)
 
     actor = user.username if user else "anonymous"
     audit = get_audit_logger()
@@ -680,6 +937,32 @@ async def rename_agent_session(
         details={"title": req.title.strip()},
     ))
     return {"status": "ok"}
+
+
+@router.put("/sessions/{session_id}/folder")
+async def move_agent_session_to_folder(
+    session_id: str,
+    req: SessionFolderMoveRequest,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    """Assign an ordinary chat session to a folder, or unfile it with null."""
+    cwd = get_user_workspace(user)
+    sessions = {session.session_id: session for session in list_sessions(directory=cwd)}
+    if session_id not in sessions:
+        raise HTTPException(404, "Session not found")
+    if session_id in load_session_origins(cwd):
+        raise HTTPException(400, "Scheduled sessions cannot be assigned to folders")
+    try:
+        move_session_to_folder(cwd, session_id, req.folder_id)
+    except SessionFolderError as exc:
+        raise _folder_http_error(exc) from exc
+    get_audit_logger().append(AuditEntry(
+        actor=user.username if user else "anonymous",
+        action="session_folder.session_moved",
+        target=session_id,
+        details={"folder_id": req.folder_id},
+    ))
+    return {"status": "ok", "folder_id": req.folder_id}
 
 
 @router.put("/sessions/{session_id}/tag")
