@@ -267,7 +267,7 @@ class RunHistoryStore:
         job_id: str | None = None,
         status: str | None = None,
     ) -> tuple[list[JobRunRecord], str | None, str | None, int | None]:
-        """O(limit) cursor-paginated query.
+        """Cursor-paginated query ordered by started_at descending.
 
         Returns (records, next_cursor, prev_cursor, total):
           - records: newest-first, up to `limit` entries.

@@ -6,6 +6,12 @@ import { copyTextToClipboard } from '../../utils/clipboard'
 import { useResizable } from '../../hooks/useResizable'
 import useUiStore from '../../stores/uiStore'
 import useChatStore from '../../stores/chatStore'
+import useSidebarStore from '../../stores/sidebarStore'
+import useToastStore from '../../stores/toastStore'
+import useTaskStore from '../../stores/taskStore'
+import useFileOpsStore from '../../stores/fileOpsStore'
+import useFileBrowserStore from '../../stores/fileBrowserStore'
+import { fetchSchedulerConversation } from '../../utils/schedulerConversation'
 import RunEventRenderer from './RunEventRenderer'
 import safeStorage from '../../utils/safeStorage'
 
@@ -54,12 +60,14 @@ export default function RunDetailDrawer({ run, onClose }) {
   const [sessionId, setSessionId] = useState(run.session_id || null)
   const [polling, setPolling] = useState(run.status === 'running')
   const [copiedField, setCopiedField] = useState(null)
+  const [openingSession, setOpeningSession] = useState(false)
   const containerRef = useRef(null)
   const intervalRef = useRef(null)
   const offsetRef = useRef(0)
 
   const setActiveNavTab = useUiStore((s) => s.setActiveNavTab)
   const loadSession = useChatStore((s) => s.loadSession)
+  const pushToast = useToastStore((s) => s.pushToast)
 
   // Persist width
   const handleResize = useCallback((w) => {
@@ -130,10 +138,40 @@ export default function RunDetailDrawer({ run, onClose }) {
     }
   }, [events])
 
-  const handleViewConversation = () => {
-    if (sessionId) {
-      loadSession(sessionId, [])
+  const handleViewConversation = async () => {
+    const targetSessionId = sessionId || run.session_id
+    if (!targetSessionId || openingSession) return
+
+    setOpeningSession(true)
+    try {
+      const transformed = await fetchSchedulerConversation(targetSessionId)
+      const sidebar = useSidebarStore.getState()
+      const ui = useUiStore.getState()
+      const taskStore = useTaskStore.getState()
+      const fileOpsStore = useFileOpsStore.getState()
+      const fileBrowserStore = useFileBrowserStore.getState()
+
+      if (sidebar.sessionQuery) sidebar.setSessionQuery('')
+      if (sidebar.sessionKind !== 'scheduler') sidebar.setSessionKind('scheduler')
+      taskStore.clearTasks()
+      fileOpsStore.clearFileOps()
+      fileBrowserStore.clear()
+      for (const task of transformed.tasks) taskStore.addTask(task)
+      for (const fileOp of transformed.fileOps) fileOpsStore.addFileOp(fileOp)
+      fileBrowserStore.setTabs(transformed.fileBrowserTabs)
+      sidebar.setActiveSessionId(targetSessionId)
+      ui.clearPlanContent()
+      ui.hideCanvas()
+      loadSession(targetSessionId, transformed.messages, null, transformed.subagentContent)
       setActiveNavTab('vivian')
+    } catch (error) {
+      pushToast({
+        level: 'error',
+        title: t('scheduler.sessionLoadFailed'),
+        body: String(error?.message || error),
+      })
+    } finally {
+      setOpeningSession(false)
     }
   }
 
@@ -297,15 +335,17 @@ export default function RunDetailDrawer({ run, onClose }) {
               color: 'var(--text-inverse)',
               border: 'none',
               borderRadius: '2px',
-              cursor: 'pointer',
+              cursor: openingSession ? 'default' : 'pointer',
+              opacity: openingSession ? 0.7 : 1,
               transition: 'opacity 150ms ease',
             }}
             onClick={handleViewConversation}
-            onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85' }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
+            disabled={openingSession}
+            onMouseEnter={(e) => { if (!openingSession) e.currentTarget.style.opacity = '0.85' }}
+            onMouseLeave={(e) => { if (!openingSession) e.currentTarget.style.opacity = '1' }}
           >
             <ExternalLink size={12} strokeWidth={1.5} />
-            {t('scheduler.viewConversation')}
+            {t(openingSession ? 'scheduler.openingConversation' : 'scheduler.viewConversation')}
           </button>
         )}
       </div>
