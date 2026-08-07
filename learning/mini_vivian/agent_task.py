@@ -73,7 +73,9 @@ class TaskStore:
 
     def create(self, prompt: str) -> AgentTask:
         task = AgentTask(prompt=prompt)
+        print(task)
         self.tasks[task.id] = task
+        print(self.tasks)
         self.save()
         return task
 
