@@ -1,6 +1,8 @@
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronLeft, ChevronRight, Eye } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Eye } from 'lucide-react'
 import { formatDateTime } from '../../utils/formatTime'
+import { sortRunHistory } from '../../utils/runHistorySort'
 
 const statusColor = {
   running: 'var(--status-running)',
@@ -9,6 +11,18 @@ const statusColor = {
   cancelled: 'var(--status-error)',
   pending: 'var(--status-pending)',
   skipped: 'var(--border-strong)',
+}
+
+const columns = [
+  { field: 'status', label: 'scheduler.status' },
+  { field: 'started_at', label: 'scheduler.startedAt' },
+  { field: 'duration_ms', label: 'scheduler.duration' },
+  { field: 'num_turns', label: 'scheduler.turns' },
+]
+
+function SortIcon({ active, direction }) {
+  if (!active) return <ArrowUpDown size={12} strokeWidth={1.5} />
+  return direction === 'asc' ? <ArrowUp size={12} strokeWidth={1.5} /> : <ArrowDown size={12} strokeWidth={1.5} />
 }
 
 function formatDuration(ms) {
@@ -39,6 +53,15 @@ export default function RunHistoryTable({
   onRunClick,
 }) {
   const { t } = useTranslation()
+  const [sort, setSort] = useState({ field: 'started_at', direction: 'desc' })
+  const sortedRuns = useMemo(
+    () => sortRunHistory(runs, sort.field, sort.direction),
+    [runs, sort],
+  )
+  const handleSort = (field) => setSort((current) => ({
+    field,
+    direction: current.field === field && current.direction === 'desc' ? 'asc' : 'desc',
+  }))
 
   if (!runs || runs.length === 0) {
     return (
@@ -58,25 +81,42 @@ export default function RunHistoryTable({
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {[t('scheduler.status'), t('scheduler.startedAt'), t('scheduler.duration'), t('scheduler.turns'), ''].map((h, i) => (
-                <th
-                  key={i}
-                  className="text-xs font-semibold uppercase px-3 py-2"
-                  style={{
-                    color: 'var(--text-secondary)',
-                    textAlign: 'left',
-                    letterSpacing: '0.06em',
-                    whiteSpace: 'nowrap',
-                    width: i === 4 ? 40 : undefined,
-                  }}
-                >
-                  {h}
-                </th>
-              ))}
+              {columns.map(({ field, label }) => {
+                const active = sort.field === field
+                return (
+                  <th
+                    key={field}
+                    aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    style={{ textAlign: 'left', whiteSpace: 'nowrap' }}
+                  >
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold uppercase"
+                      style={{
+                        width: '100%',
+                        background: 'transparent',
+                        border: 'none',
+                        color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        letterSpacing: '0.06em',
+                        transition: 'color 150ms ease',
+                      }}
+                      onClick={() => handleSort(field)}
+                      title={t('scheduler.sortCurrentPage')}
+                    >
+                      <span>{t(label)}</span>
+                      <span style={{ color: active ? 'var(--blue)' : 'var(--text-dim)' }}>
+                        <SortIcon active={active} direction={sort.direction} />
+                      </span>
+                    </button>
+                  </th>
+                )
+              })}
+              <th style={{ width: 40 }} />
             </tr>
           </thead>
           <tbody>
-            {runs.map((run) => (
+            {sortedRuns.map((run) => (
               <tr
                 key={run.run_id}
                 style={{

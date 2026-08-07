@@ -232,11 +232,12 @@ def _read_records_before(
             if rid in seen:
                 continue
             seen[rid] = raw
-            if len(seen) > limit:
-                has_more = True
-                break
 
+        # A record can be appended again when its status changes. Finish the
+        # current daily file before truncating so a later write for an older
+        # run cannot hide a newer run that appears earlier on disk.
         if len(seen) > limit:
+            has_more = True
             break
 
     # Sort newest-first and cap to limit
