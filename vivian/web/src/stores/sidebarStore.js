@@ -14,7 +14,7 @@ import safeStorage from '../utils/safeStorage'
 
 const STORAGE_KEY_WIDTH = 'sidebar-width'
 const STORAGE_KEY_COLLAPSED = 'sidebar-collapsed'
-const PAGE_SIZE = 20
+const PAGE_SIZE = 50
 const ACTIVE_CHAT_KEY = 'vivian-active-chat'
 const ACTIVE_SESSION_ALIAS_KEY = 'vivian-active-session-alias'
 const EXPANDED_FOLDERS_KEY = 'session-folder-expanded'
@@ -182,6 +182,7 @@ const useSidebarStore = create((set, get) => ({
   sessionKind: 'chat',
   sessionQuery: '',
   sessionCounts: { chat: 0, scheduler: 0, all: 0 },
+  sessionCatalogStatus: null,
   sessionFolders: [],
   unfiledCount: 0,
   folderBuckets: {},
@@ -312,6 +313,7 @@ const useSidebarStore = create((set, get) => ({
     try {
       const data = await apiFetchFolderSessions(folderId, { limit: PAGE_SIZE, offset })
       const mapped = (data.sessions || []).map(mapSession)
+      const catalogReady = data.catalog_status?.total_exact !== false
       set((s) => {
         const current = s.folderBuckets[folderId] || {}
         const sessions = reset
@@ -325,9 +327,9 @@ const useSidebarStore = create((set, get) => ({
               sessions,
               total: data.total ?? sessions.length,
               offset: nextOffset,
-              hasMore: nextOffset < (data.total ?? sessions.length),
+              hasMore: catalogReady && nextOffset < (data.total ?? sessions.length),
               loading: false,
-              loaded: true,
+              loaded: catalogReady,
             },
           },
         }
@@ -492,20 +494,24 @@ const useSidebarStore = create((set, get) => ({
     try {
       if (foldersVisible) {
         const activeLookupKey = getStoredSessionAlias() || get().activeSessionId
-        const [folderData, unfiledData, countData, activeData, activeLookupData] = await Promise.all([
+        const [folderData, unfiledData, countData, activeData] = await Promise.all([
           apiFetchSessionFolders(),
           apiFetchFolderSessions('unfiled', { limit: PAGE_SIZE, offset: 0 }),
           apiFetchSessions({ limit: 1, offset: 0, kind: 'chat' }),
           fetchActiveRuns().catch(() => ({ runs: [] })),
-          activeLookupKey && !activeLookupKey.startsWith('run:')
-            ? apiFetchSessions({
-                limit: 1,
-                offset: 0,
-                kind: 'chat',
-                q: activeLookupKey,
-              }).catch(() => ({ sessions: [] }))
-            : Promise.resolve({ sessions: [] }),
         ])
+        if (generation !== sessionsRequestGeneration) return
+        const catalogReady = unfiledData.catalog_status?.total_exact !== false
+        const activeLookupData = catalogReady
+          && activeLookupKey
+          && !activeLookupKey.startsWith('run:')
+          ? await apiFetchSessions({
+              limit: 1,
+              offset: 0,
+              kind: 'chat',
+              q: activeLookupKey,
+            }).catch(() => ({ sessions: [] }))
+          : { sessions: [] }
         if (generation !== sessionsRequestGeneration) return
         const persisted = (unfiledData.sessions || []).map(mapSession)
         const previous = get().sessions
@@ -550,12 +556,13 @@ const useSidebarStore = create((set, get) => ({
           unfiledCount: (folderData.unfiled_count || 0) + unpersistedActive,
           sessionsTotal: (unfiledData.total || 0) + unpersistedActive,
           sessionsOffset: persisted.length,
-          sessionsHasMore: persisted.length < (unfiledData.total || 0),
+          sessionsHasMore: catalogReady && persisted.length < (unfiledData.total || 0),
           sessionCounts: {
             chat: counts.chat + unpersistedActive,
             scheduler: counts.scheduler,
             all: counts.all + unpersistedActive,
           },
+          sessionCatalogStatus: unfiledData.catalog_status || folderData.catalog_status || null,
         })
         for (const folderId of expandedFolderIds) {
           if (!folderBuckets[folderId]?.loaded) void get().fetchFolderSessions(folderId).catch(() => {})
@@ -575,6 +582,7 @@ const useSidebarStore = create((set, get) => ({
       ])
       if (generation !== sessionsRequestGeneration) return
       const hasKindMetadata = Boolean(data.counts)
+      const catalogReady = data.catalog_status?.total_exact !== false
       const mappedPersisted = (data.sessions || []).map(mapSession)
       // During a rolling deployment an older API may ignore `kind` and omit
       // classification metadata. Those legacy rows are all historical chats:
@@ -608,15 +616,16 @@ const useSidebarStore = create((set, get) => ({
         activeSessionId: restoredActive,
         sessionsTotal: persistedTotal + unpersistedActive,
         sessionsOffset: persisted.length,
-        sessionsHasMore: persisted.length < persistedTotal,
+        sessionsHasMore: catalogReady && persisted.length < persistedTotal,
         sessionCounts: {
           chat: counts.chat + unpersistedActive,
           scheduler: counts.scheduler,
           all: counts.all + unpersistedActive,
         },
+        sessionCatalogStatus: data.catalog_status || null,
       })
     } catch (err) {
-      if (err instanceof UnauthorizedError) return
+      if (err instanceof UnauthorizedError || err?.silent) return
       console.error('Failed to fetch sessions:', err)
       set({ folderError: String(err?.message || err) })
     } finally {
@@ -631,6 +640,7 @@ const useSidebarStore = create((set, get) => ({
     sessionsTotal: 0, sessionsOffset: 0, sessionsLoading: false,
     sessionsHasMore: false, sessionKind: 'chat', sessionQuery: '',
     sessionCounts: { chat: 0, scheduler: 0, all: 0 },
+    sessionCatalogStatus: null,
     sessionFolders: [], unfiledCount: 0, folderBuckets: {},
     expandedFolderIds: getStoredExpandedFolders(), foldersLoading: false,
     folderError: null,
@@ -664,6 +674,7 @@ const useSidebarStore = create((set, get) => ({
           sessionsTotal: total + unpersistedActive,
           sessionsOffset: s.sessionsOffset + newSessions.length,
           sessionsHasMore: s.sessionsOffset + newSessions.length < total,
+          sessionCatalogStatus: data.catalog_status || s.sessionCatalogStatus,
           sessionCounts: data.counts
             ? {
                 chat: data.counts.chat + unpersistedActive,
@@ -674,7 +685,7 @@ const useSidebarStore = create((set, get) => ({
         }
       })
     } catch (err) {
-      if (err instanceof UnauthorizedError) return
+      if (err instanceof UnauthorizedError || err?.silent) return
       console.error('Failed to fetch more sessions:', err)
     } finally {
       if (generation === sessionsRequestGeneration) set({ sessionsLoading: false })

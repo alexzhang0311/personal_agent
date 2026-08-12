@@ -7,10 +7,12 @@ import { changeMyPassword } from '../../api/auth'
 import {
   getCliPath,
   getHistoryRetention,
+  getSchedulerSessionRetention,
   getRetryableTools,
   getSensitivePatterns,
   updateCliPath,
   updateHistoryRetention,
+  updateSchedulerSessionRetention,
   updateRetryableTools,
   updateSensitivePatterns,
 } from '../../api/admin'
@@ -1620,6 +1622,7 @@ function SystemPromptTab() {
       {/* History Retention section */}
       <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 16 }}>
         <HistoryRetentionSection />
+        <SchedulerSessionRetentionSection />
       </div>
 
       {/* CLI Path section */}
@@ -1680,9 +1683,9 @@ function HistoryRetentionSection() {
       <div className="flex items-center gap-2">
         <input
           type="number"
-          min="0"
+          min="1"
           value={days}
-          onChange={(e) => { setDays(parseInt(e.target.value, 10) || 0); setDirty(true) }}
+          onChange={(e) => { setDays(Math.max(1, parseInt(e.target.value, 10) || 1)); setDirty(true) }}
           style={{
             background: 'var(--bg-elevated)',
             border: '1px solid var(--border)',
@@ -1697,7 +1700,7 @@ function HistoryRetentionSection() {
           }}
         />
         <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          {days > 0 ? t('settings.historyRetentionDays') : t('settings.historyRetentionDisabled')}
+          {t('settings.historyRetentionDays')}
         </span>
         <button
           className="px-3 py-1 text-xs font-semibold flex-shrink-0"
@@ -1710,6 +1713,72 @@ function HistoryRetentionSection() {
             cursor: dirty ? 'pointer' : 'default',
             opacity: dirty ? 1 : 0.5,
             transition: 'opacity 150ms ease',
+          }}
+          onClick={handleSave}
+        >
+          {saving ? t('settings.saving') : t('settings.save')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+
+
+function SchedulerSessionRetentionSection() {
+  const { t } = useTranslation()
+  const [days, setDays] = useState(7)
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    getSchedulerSessionRetention().then((data) => {
+      setDays(data.scheduler_session_retention_days ?? 7)
+      setLoaded(true)
+    }).catch(() => setLoaded(true))
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await updateSchedulerSessionRetention({ scheduler_session_retention_days: days })
+      setDirty(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!loaded) return <div className="skeleton" style={{ height: 36, width: '100%' }} />
+
+  return (
+    <div className="flex flex-col gap-3" style={{ marginTop: 16 }}>
+      <label style={{ ...labelStyle, marginBottom: 0 }}>{t('settings.schedulerSessionRetention')}</label>
+      <p className="text-xs" style={{ color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+        {t('settings.schedulerSessionRetentionDesc')}
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min="1"
+          value={days}
+          onChange={(e) => { setDays(Math.max(1, parseInt(e.target.value, 10) || 1)); setDirty(true) }}
+          style={{
+            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+            borderRadius: 4, color: 'var(--text-primary)', padding: '6px 10px',
+            fontSize: 13, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+            outline: 'none', width: 72, textAlign: 'center',
+          }}
+        />
+        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('settings.historyRetentionDays')}</span>
+        <button
+          className="px-3 py-1 text-xs font-semibold flex-shrink-0"
+          disabled={saving || !dirty}
+          style={{
+            background: dirty ? 'var(--blue)' : 'var(--bg-elevated)',
+            color: dirty ? 'var(--text-inverse)' : 'var(--text-dim)',
+            border: 'none', borderRadius: 4, cursor: dirty ? 'pointer' : 'default',
+            opacity: dirty ? 1 : 0.5, transition: 'opacity 150ms ease',
           }}
           onClick={handleSave}
         >

@@ -42,6 +42,25 @@ def _session(session_id: str, modified: int = 1):
     )
 
 
+
+class _FakeCatalog:
+    def __init__(self, sessions):
+        self.sessions = sessions
+
+    async def inventory(self, _cwd):
+        return SimpleNamespace(
+            sessions=self.sessions,
+            candidate_ids=[row.session_id for row in self.sessions],
+            status=SimpleNamespace(
+                state="ready", discovered=len(self.sessions), processed=len(self.sessions),
+                total_exact=True, last_error=None,
+            ),
+        )
+
+    async def snapshot(self, _cwd, **_kwargs):
+        return await self.inventory(_cwd)
+
+
 class SessionFolderStoreTests(unittest.TestCase):
     def test_crud_move_and_delete_unfiles_without_removing_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -119,7 +138,7 @@ class SessionFolderContractTests(unittest.IsolatedAsyncioTestCase):
             }
             with (
                 patch("vivian.api.routers.agent.get_user_workspace", return_value=tmpdir),
-                patch("vivian.api.routers.agent.list_sessions", return_value=sessions),
+                patch("vivian.api.routers.agent.get_session_catalog", return_value=_FakeCatalog(sessions)),
                 patch("vivian.api.routers.agent.load_session_origins", return_value=origins),
             ):
                 response = await list_agent_session_folders(user=None)
@@ -146,8 +165,8 @@ class SessionFolderContractTests(unittest.IsolatedAsyncioTestCase):
                     return_value=tmpdir,
                 ),
                 patch(
-                    "vivian.api.routers.agent.list_sessions",
-                    return_value=sessions,
+                    "vivian.api.routers.agent.get_session_catalog",
+                    return_value=_FakeCatalog(sessions),
                 ),
                 patch(
                     "vivian.api.routers.agent.load_session_origins",
@@ -190,8 +209,8 @@ class SessionFolderContractTests(unittest.IsolatedAsyncioTestCase):
                     return_value=tmpdir,
                 ),
                 patch(
-                    "vivian.api.routers.agent.list_sessions",
-                    return_value=sessions,
+                    "vivian.api.routers.agent.get_session_catalog",
+                    return_value=_FakeCatalog(sessions),
                 ),
                 patch(
                     "vivian.api.routers.agent.load_session_origins",
@@ -231,8 +250,10 @@ class SessionFolderContractTests(unittest.IsolatedAsyncioTestCase):
                     return_value=tmpdir,
                 ),
                 patch(
-                    "vivian.api.routers.agent.list_sessions",
-                    return_value=[_session("scheduled-1")],
+                    "vivian.api.routers.agent.get_session_info",
+                    side_effect=lambda session_id, _cwd: (
+                        _session("scheduled-1") if session_id == "scheduled-1" else None
+                    ),
                 ),
                 patch(
                     "vivian.api.routers.agent.load_session_origins",

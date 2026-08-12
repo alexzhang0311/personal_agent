@@ -177,6 +177,14 @@ class SessionKindCounts(BaseModel):
     all: int = 0
 
 
+class SessionCatalogStatusResponse(BaseModel):
+    state: Literal["building", "ready", "error"]
+    discovered: int = 0
+    processed: int = 0
+    total_exact: bool = False
+    last_error: str | None = None
+
+
 class SessionMessageResponse(BaseModel):
     type: Literal["user", "assistant"]
     uuid: str
@@ -189,9 +197,10 @@ class SessionMessageResponse(BaseModel):
 class SessionListResponse(BaseModel):
     sessions: list[SessionInfoResponse]
     total: int = 0
-    limit: int = 20
+    limit: int = 50
     offset: int = 0
     counts: SessionKindCounts = Field(default_factory=SessionKindCounts)
+    catalog_status: SessionCatalogStatusResponse | None = None
 
 
 class SessionFolderResponse(BaseModel):
@@ -204,6 +213,7 @@ class SessionFolderResponse(BaseModel):
 class SessionFolderListResponse(BaseModel):
     folders: list[SessionFolderResponse] = Field(default_factory=list)
     unfiled_count: int = 0
+    catalog_status: SessionCatalogStatusResponse | None = None
 
 
 class SessionMessagesResponse(BaseModel):

@@ -3,7 +3,7 @@ app_name: "TCTP vivian API Server"
 server:
   host: "0.0.0.0"
   port: 8081
-  debug: true
+  debug: false
   work_dir: "~/vivian_workspace"
 
 auth:

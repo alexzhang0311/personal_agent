@@ -165,6 +165,7 @@ class UserStore:
         #   cli_path               : str | None
         #   append_systemprompt    : dict {enable, content}
         #   history_retention_days : int
+        #   scheduler_session_retention_days : int
         #   retryable_tools        : list[dict]
         #   risky_tool_list        : list[str] -- Claude Code permission DSL
         #                            patterns forcing user approval in

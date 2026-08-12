@@ -3,12 +3,12 @@ import { getAuthHeaders, handleAPIResponse } from './client'
 const BASE_URL = '/api'
 
 export async function fetchSessions({
-  limit = 20,
+  limit = 50,
   offset = 0,
   source = 'project',
   kind = 'all',
   q = '',
-} = {}) {
+} = {}, responseOptions = {}) {
   const params = new URLSearchParams()
   params.set('limit', String(limit))
   params.set('offset', String(offset))
@@ -18,7 +18,11 @@ export async function fetchSessions({
   const res = await fetch(`${BASE_URL}/agent/sessions?${params}`, {
     headers: { ...getAuthHeaders() },
   })
-  return handleAPIResponse(res)
+  const silentStatuses = [
+    ...(responseOptions.silentStatuses || []),
+    ...(q.trim() ? [503] : []),
+  ]
+  return handleAPIResponse(res, { ...responseOptions, silentStatuses })
 }
 
 export async function fetchActiveRuns() {

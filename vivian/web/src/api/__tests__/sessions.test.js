@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fetchFolderSessions, fetchSessions, moveSessionToFolder } from '../sessions'
+import useToastStore from '../../stores/toastStore'
 
 describe('sessions API query', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    useToastStore.getState().clearToasts()
   })
 
   it('sends origin and trimmed server-side search parameters', async () => {
@@ -31,6 +33,37 @@ describe('sessions API query', () => {
       kind: 'scheduler',
       q: 'nightly report',
     })
+  })
+
+  it('can silence an expected catalog-building 503', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () => '{"detail":"Session history is still being prepared"}',
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = fetchSessions({ q: 'session-id' })
+    await expect(request).rejects.toMatchObject({
+      status: 503, silent: true,
+    })
+
+    expect(useToastStore.getState().toasts).toEqual([])
+  })
+
+  it('still shows unexpected API errors', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => 'internal error',
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchSessions()).rejects.toMatchObject({
+      status: 500, silent: false,
+    })
+
+    expect(useToastStore.getState().toasts).toHaveLength(1)
   })
 
   it('pages one folder using the reserved unfiled identifier', async () => {

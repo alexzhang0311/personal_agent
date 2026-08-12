@@ -109,6 +109,10 @@ curl GET /api/auth/me \
   -H "Authorization: Bearer <token>"
 ```
 
+默认行为保持不变，会计算精确的历史消息统计。WebUI 登录阶段使用
+`?lazy_session_stats=true`，只读取 Session 文件名、大小和时间戳，避免逐行扫描
+大体积 JSONL；该模式下消息数为暂未计算的 0，其余审计统计正常返回。
+
 **响应**：
 ```json
 {

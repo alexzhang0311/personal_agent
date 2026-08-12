@@ -9,8 +9,8 @@ from typing import Literal
 from claude_agent_sdk import (
     ClaudeSDKClient,
     fork_session as sdk_fork_session,
+    get_session_info,
     get_session_messages,
-    list_sessions,
     rename_session as sdk_rename_session,
     tag_session as sdk_tag_session,
 )
@@ -37,6 +37,7 @@ from ..models.agent import (
     SessionFolderResponse,
     SessionInfoResponse,
     SessionKindCounts,
+    SessionCatalogStatusResponse,
     SessionListResponse,
     SessionMessageResponse,
     SessionMessagesResponse,
@@ -52,6 +53,7 @@ from ..services.audit_log import AuditEntry, get_audit_logger
 from ..services.active_runs import active_run_manager
 from ..services.auth import authenticate_raw_token, decode_jwt, get_current_user, get_user_workspace
 from ..services.claude_sdk.client import agent_run
+from ..services.session_catalog import get_session_catalog
 from ..services.claude_sdk.options import build_agent_options
 from ..services.claude_sdk.permission_coordinator import registry
 from ..services.session_folders import (
@@ -440,28 +442,29 @@ def _session_info_response(
 
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_agent_sessions(
-    limit: int = Query(default=20, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    source: Literal["all", "project", "global"] = "all",  # deprecated — ignored
+    source: Literal["all", "project", "global"] = "all",
     kind: Literal["all", "chat", "scheduler"] = "all",
     q: str | None = Query(default=None, max_length=200),
     user: UserRecord | None = Depends(get_current_user),
 ):
-    """List and search past sessions from this project workspace.
-
-    The ``source`` query parameter is accepted for backwards compatibility
-    but ignored — every response now contains only ``<work_dir>/<username>``
-    sessions, tagged as ``"project"``. Source/search filtering happens before
-    pagination so older matching sessions are discoverable.
-    """
-    del source  # legacy parameter, kept for client compat
+    """List project sessions without blocking the API event loop."""
+    del source
     cwd = get_user_workspace(user)
-    raw = list_sessions(directory=cwd)
-    origins = load_session_origins(cwd)
-    folder_state = load_session_folders(cwd)
+    origins, folder_state = await asyncio.gather(
+        asyncio.to_thread(load_session_origins, cwd),
+        asyncio.to_thread(load_session_folders, cwd),
+    )
+    catalog = get_session_catalog()
+    initial = await catalog.inventory(cwd)
     needle = (q or "").strip().casefold()
+    if needle and not initial.status.total_exact:
+        raise HTTPException(503, "Session history is still being prepared; retry search shortly")
+
+    snapshot = await catalog.snapshot(cwd, required=offset + limit)
     enriched: list[tuple[object, str, dict[str, str] | None, str | None]] = []
-    for session in raw:
+    for session in snapshot.sessions:
         scheduler_context = origins.get(session.session_id)
         session_kind = "scheduler" if scheduler_context else "chat"
         if needle:
@@ -481,32 +484,44 @@ async def list_agent_sessions(
         )
         enriched.append((session, session_kind, scheduler_context, folder_id))
 
-    counts = SessionKindCounts(
-        chat=sum(1 for _, session_kind, _, _ in enriched if session_kind == "chat"),
-        scheduler=sum(1 for _, session_kind, _, _ in enriched if session_kind == "scheduler"),
-        all=len(enriched),
-    )
-    filtered = (
-        enriched
-        if kind == "all"
-        else [row for row in enriched if row[1] == kind]
-    )
-    total = len(filtered)
+    if snapshot.status.total_exact:
+        counts = SessionKindCounts(
+            chat=sum(1 for _, row_kind, _, _ in enriched if row_kind == "chat"),
+            scheduler=sum(1 for _, row_kind, _, _ in enriched if row_kind == "scheduler"),
+            all=len(enriched),
+        )
+    else:
+        scheduler_total = sum(1 for session_id in snapshot.candidate_ids if session_id in origins)
+        counts = SessionKindCounts(
+            chat=len(snapshot.candidate_ids) - scheduler_total,
+            scheduler=scheduler_total,
+            all=len(snapshot.candidate_ids),
+        )
+    filtered = enriched if kind == "all" else [row for row in enriched if row[1] == kind]
+    if snapshot.status.total_exact:
+        total = len(filtered)
+    elif kind == "chat":
+        total = counts.chat
+    elif kind == "scheduler":
+        total = counts.scheduler
+    else:
+        total = counts.all
     page = filtered[offset : offset + limit]
     return SessionListResponse(
         sessions=[
             _session_info_response(
-                s,
+                session,
                 session_kind=session_kind,
                 scheduler_context=scheduler_context,
                 folder_id=folder_id,
             )
-            for s, session_kind, scheduler_context, folder_id in page
+            for session, session_kind, scheduler_context, folder_id in page
         ],
         total=total,
         limit=limit,
         offset=offset,
         counts=counts,
+        catalog_status=SessionCatalogStatusResponse(**vars(snapshot.status)),
     )
 
 
@@ -522,16 +537,18 @@ def _folder_http_error(exc: SessionFolderError) -> HTTPException:
 async def list_agent_session_folders(
     user: UserRecord | None = Depends(get_current_user),
 ):
-    """List single-level folders and counts for ordinary chat sessions."""
+    """List folders using provisional file counts while the catalog builds."""
     cwd = get_user_workspace(user)
-    sessions = list_sessions(directory=cwd)
-    origins = load_session_origins(cwd)
-    state = load_session_folders(cwd)
-    chat_ids = {
-        session.session_id
-        for session in sessions
-        if session.session_id not in origins
-    }
+    origins, state, snapshot = await asyncio.gather(
+        asyncio.to_thread(load_session_origins, cwd),
+        asyncio.to_thread(load_session_folders, cwd),
+        get_session_catalog().inventory(cwd),
+    )
+    if snapshot.status.total_exact:
+        session_ids = [session.session_id for session in snapshot.sessions]
+    else:
+        session_ids = snapshot.candidate_ids
+    chat_ids = {session_id for session_id in session_ids if session_id not in origins}
     counts = {folder_id: 0 for folder_id in state.folders}
     unfiled_count = 0
     for session_id in chat_ids:
@@ -540,11 +557,7 @@ async def list_agent_session_folders(
             unfiled_count += 1
         else:
             counts[folder_id] += 1
-    folders = sorted(
-        state.folders.values(),
-        key=lambda folder: folder.created_at,
-        reverse=True,
-    )
+    folders = sorted(state.folders.values(), key=lambda folder: folder.created_at, reverse=True)
     return SessionFolderListResponse(
         folders=[
             SessionFolderResponse(
@@ -556,6 +569,7 @@ async def list_agent_session_folders(
             for folder in folders
         ],
         unfiled_count=unfiled_count,
+        catalog_status=SessionCatalogStatusResponse(**vars(snapshot.status)),
     )
 
 
@@ -594,13 +608,16 @@ async def rename_agent_session_folder(
         folder = rename_session_folder(cwd, folder_id, req.name)
     except SessionFolderError as exc:
         raise _folder_http_error(exc) from exc
-    state = load_session_folders(cwd)
-    origins = load_session_origins(cwd)
-    chat_ids = {
-        session.session_id
-        for session in list_sessions(directory=cwd)
-        if session.session_id not in origins
-    }
+    state, origins, snapshot = await asyncio.gather(
+        asyncio.to_thread(load_session_folders, cwd),
+        asyncio.to_thread(load_session_origins, cwd),
+        get_session_catalog().inventory(cwd),
+    )
+    session_ids = (
+        [session.session_id for session in snapshot.sessions]
+        if snapshot.status.total_exact else snapshot.candidate_ids
+    )
+    chat_ids = {session_id for session_id in session_ids if session_id not in origins}
     session_count = sum(
         1
         for session_id in chat_ids
@@ -642,24 +659,42 @@ async def delete_agent_session_folder(
 @router.get("/session-folders/{folder_id}/sessions", response_model=SessionListResponse)
 async def list_agent_session_folder_sessions(
     folder_id: str,
-    limit: int = Query(default=20, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     user: UserRecord | None = Depends(get_current_user),
 ):
     """Page ordinary chat sessions assigned to one folder or ``unfiled``."""
     cwd = get_user_workspace(user)
-    state = load_session_folders(cwd)
+    state, origins = await asyncio.gather(
+        asyncio.to_thread(load_session_folders, cwd),
+        asyncio.to_thread(load_session_origins, cwd),
+    )
     if folder_id != "unfiled" and folder_id not in state.folders:
         raise HTTPException(404, "Session folder not found")
-    origins = load_session_origins(cwd)
-    matching = []
-    for session in list_sessions(directory=cwd):
+
+    def matches(session) -> bool:
         if session.session_id in origins:
-            continue
+            return False
         assigned = _assigned_folder_id(state, session.session_id)
-        if (folder_id == "unfiled" and assigned is None) or assigned == folder_id:
-            matching.append(session)
-    total = len(matching)
+        return (folder_id == "unfiled" and assigned is None) or assigned == folder_id
+
+    snapshot = await get_session_catalog().snapshot(
+        cwd,
+        required=offset + limit,
+    )
+    matching = [session for session in snapshot.sessions if matches(session)]
+    if snapshot.status.total_exact:
+        total = len(matching)
+    else:
+        total = sum(
+            1
+            for session_id in snapshot.candidate_ids
+            if session_id not in origins
+            and (
+                (folder_id == "unfiled" and _assigned_folder_id(state, session_id) is None)
+                or _assigned_folder_id(state, session_id) == folder_id
+            )
+        )
     page = matching[offset : offset + limit]
     return SessionListResponse(
         sessions=[
@@ -675,6 +710,7 @@ async def list_agent_session_folder_sessions(
         limit=limit,
         offset=offset,
         counts=SessionKindCounts(chat=total, all=total),
+        catalog_status=SessionCatalogStatusResponse(**vars(snapshot.status)),
     )
 
 
@@ -737,14 +773,22 @@ async def get_agent_session_messages(
 ):
     """Retrieve messages from a specific past session."""
     cwd = get_user_workspace(user)
-    messages = get_session_messages(
-        session_id=session_id, directory=cwd, limit=limit, offset=offset
+    messages, replay_metadata = await asyncio.gather(
+        asyncio.to_thread(
+            get_session_messages,
+            session_id=session_id,
+            directory=cwd,
+            limit=limit,
+            offset=offset,
+        ),
+        asyncio.to_thread(_build_message_replay_metadata, cwd, session_id),
     )
-    replay_metadata = _build_message_replay_metadata(cwd, session_id)
     sidechain_messages: list[SessionMessageResponse] = []
     if limit is None and offset == 0:
         try:
-            sidechain_messages = _load_subagent_session_messages(cwd, session_id)
+            sidechain_messages = await asyncio.to_thread(
+                _load_subagent_session_messages, cwd, session_id
+            )
         except Exception:
             logger.exception("Failed to hydrate subagent messages for session %s", session_id)
 
@@ -768,9 +812,8 @@ async def delete_agent_session(session_id: str, user: UserRecord | None = Depend
     """Delete a project-level session file. Only project sessions can be deleted."""
     cwd = get_user_workspace(user)
 
-    # Verify this session belongs to the current project
-    project_ids = {s.session_id for s in list_sessions(directory=cwd)}
-    if session_id not in project_ids:
+    session_info = await asyncio.to_thread(get_session_info, session_id, cwd)
+    if session_info is None:
         raise HTTPException(403, "Only project-level sessions can be deleted")
 
     # Resolve the session file path
@@ -781,7 +824,8 @@ async def delete_agent_session(session_id: str, user: UserRecord | None = Depend
     if not session_file.exists():
         raise HTTPException(404, "Session file not found")
 
-    session_file.unlink()
+    await asyncio.to_thread(session_file.unlink)
+    get_session_catalog().invalidate(cwd)
     try:
         delete_session_origin(cwd, session_id)
     except Exception:
@@ -895,12 +939,14 @@ async def fork_agent_session(
     """Fork a session — either mid-session (up_to_message_uuid) or tail fork."""
     cwd = get_user_workspace(user)
     try:
-        result = sdk_fork_session(
+        result = await asyncio.to_thread(
+            sdk_fork_session,
             session_id=req.session_id,
             directory=cwd,
             up_to_message_id=req.up_to_message_uuid,
             title=req.title,
         )
+        get_session_catalog().invalidate(cwd)
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(400, str(exc)) from exc
     get_audit_logger().append(AuditEntry(
@@ -925,9 +971,13 @@ async def rename_agent_session(
     """Rename a session by appending a custom-title entry."""
     cwd = get_user_workspace(user)
     try:
-        sdk_rename_session(
-            session_id=session_id, title=req.title.strip(), directory=cwd,
+        await asyncio.to_thread(
+            sdk_rename_session,
+            session_id=session_id,
+            title=req.title.strip(),
+            directory=cwd,
         )
+        get_session_catalog().invalidate(cwd)
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(400, str(exc)) from exc
     get_audit_logger().append(AuditEntry(
@@ -947,10 +997,13 @@ async def move_agent_session_to_folder(
 ):
     """Assign an ordinary chat session to a folder, or unfile it with null."""
     cwd = get_user_workspace(user)
-    sessions = {session.session_id: session for session in list_sessions(directory=cwd)}
-    if session_id not in sessions:
+    session_info, origins = await asyncio.gather(
+        asyncio.to_thread(get_session_info, session_id, cwd),
+        asyncio.to_thread(load_session_origins, cwd),
+    )
+    if session_info is None:
         raise HTTPException(404, "Session not found")
-    if session_id in load_session_origins(cwd):
+    if session_id in origins:
         raise HTTPException(400, "Scheduled sessions cannot be assigned to folders")
     try:
         move_session_to_folder(cwd, session_id, req.folder_id)
@@ -974,7 +1027,10 @@ async def tag_agent_session(
     """Set or clear a session's tag (pass tag=None to clear)."""
     cwd = get_user_workspace(user)
     try:
-        sdk_tag_session(session_id=session_id, tag=req.tag, directory=cwd)
+        await asyncio.to_thread(
+            sdk_tag_session, session_id=session_id, tag=req.tag, directory=cwd
+        )
+        get_session_catalog().invalidate(cwd)
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(400, str(exc)) from exc
     get_audit_logger().append(AuditEntry(

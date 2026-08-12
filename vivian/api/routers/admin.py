@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+from datetime import datetime, timezone
 from pathlib import Path
 
-from claude_agent_sdk import list_sessions
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..models.admin import (
@@ -17,6 +17,8 @@ from ..models.admin import (
     HistoryRetentionUpdate,
     PresetPromptResponse,
     PresetPromptUpdate,
+    SchedulerSessionRetentionResponse,
+    SchedulerSessionRetentionUpdate,
     RetryableToolEntry,
     RetryCallbackWeComConfig,
     RetryableToolsResponse,
@@ -36,6 +38,7 @@ from ..services.audit_log import AuditEntry, get_audit_logger
 from ..services.auth import require_admin, user_record_to_public
 from ..services.config import get_settings
 from ..services.scheduler.job_store import get_job_store
+from ..services.session_catalog import get_session_catalog
 from ..services.scheduler.shared import get_state_path, write_command
 from ..services.skills import delete_skill as service_delete_skill
 from ..services.skills import list_skills as service_list_skills
@@ -209,13 +212,15 @@ async def get_admin_stats():
 
         if user_workspace.exists():
             try:
-                sessions = list_sessions(directory=str(user_workspace))
-                session_count = len(sessions)
-                for s in sessions:
-                    storage_bytes += s.file_size or 0
-                    if s.last_modified:
-                        if last_active is None or s.last_modified > last_active:
-                            last_active = s.last_modified
+                inventory = await get_session_catalog().inventory(
+                    str(user_workspace), build_background=False
+                )
+                session_count = len(inventory.candidates)
+                storage_bytes = sum(row.size for row in inventory.candidates)
+                if inventory.candidates:
+                    last_active = datetime.fromtimestamp(
+                        inventory.candidates[0].mtime_ms / 1000, tz=timezone.utc
+                    )
             except Exception:
                 pass
 
@@ -533,7 +538,7 @@ async def update_cli_path(
 async def get_history_retention():
     store = get_user_store()
     runtime = store.get_runtime_config()
-    days = runtime.get("history_retention_days", 7)
+    days = max(1, int(runtime.get("history_retention_days", 7)))
     return HistoryRetentionResponse(history_retention_days=days)
 
 
@@ -552,6 +557,39 @@ async def update_history_retention(
         details={"history_retention_days": request.history_retention_days},
     ))
     return HistoryRetentionResponse(history_retention_days=request.history_retention_days)
+
+
+@router.get(
+    "/scheduler-session-retention",
+    response_model=SchedulerSessionRetentionResponse,
+)
+async def get_scheduler_session_retention():
+    runtime = get_user_store().get_runtime_config()
+    days = max(1, int(runtime.get("scheduler_session_retention_days", 7)))
+    return SchedulerSessionRetentionResponse(scheduler_session_retention_days=days)
+
+
+@router.put(
+    "/scheduler-session-retention",
+    response_model=SchedulerSessionRetentionResponse,
+)
+async def update_scheduler_session_retention(
+    request: SchedulerSessionRetentionUpdate,
+    current_user: UserRecord = Depends(require_admin),
+):
+    get_user_store().update_runtime_config(
+        "scheduler_session_retention_days",
+        request.scheduler_session_retention_days,
+    )
+    get_audit_logger().append(AuditEntry(
+        actor=current_user.username,
+        action="runtime.scheduler_session_retention_updated",
+        target="scheduler_session_retention_days",
+        details={"scheduler_session_retention_days": request.scheduler_session_retention_days},
+    ))
+    return SchedulerSessionRetentionResponse(
+        scheduler_session_retention_days=request.scheduler_session_retention_days
+    )
 
 
 @router.get("/retryable-tools", response_model=RetryableToolsResponse)

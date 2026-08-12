@@ -43,6 +43,19 @@ class ActiveRunManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run_b.status, "waiting_user")
         self.assertIn("p-b", run_b.pending_requests)
 
+    async def test_stream_envelope_contract_remains_flat_and_nested_data_unchanged(self):
+        manager = ActiveRunManager()
+        run = ActiveRun("run-a", "alice", "hello")
+        manager._runs[run.run_id] = run
+        payload = {"content": [{"type": "text", "text": "hello"}]}
+
+        await manager._publish(run, "assistant", payload)
+        event = (manager.subscribe(run)).get_nowait()
+
+        self.assertEqual(set(event), {"run_id", "session_id", "seq", "event", "data"})
+        self.assertEqual(event["event"], "assistant")
+        self.assertIs(event["data"], payload)
+
     async def test_permission_resolution_broadcasts_to_all_subscribers(self):
         manager = ActiveRunManager()
         run = ActiveRun("run-a", "alice", "hello")

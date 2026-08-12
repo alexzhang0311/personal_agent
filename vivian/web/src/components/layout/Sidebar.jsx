@@ -533,6 +533,7 @@ export default function Sidebar() {
   const sessionKind = useSidebarStore((s) => s.sessionKind)
   const sessionQuery = useSidebarStore((s) => s.sessionQuery)
   const sessionCounts = useSidebarStore((s) => s.sessionCounts)
+  const sessionCatalogStatus = useSidebarStore((s) => s.sessionCatalogStatus)
   const sessionFolders = useSidebarStore((s) => s.sessionFolders)
   const folderBuckets = useSidebarStore((s) => s.folderBuckets)
   const moveSessionToFolder = useSidebarStore((s) => s.moveSessionToFolder)
@@ -578,10 +579,21 @@ export default function Sidebar() {
 
   const groupedSessions = useMemo(() => groupSessionsByDate(sessions), [sessions])
   const folderView = sessionKind === 'chat' && !sessionQuery
+  const catalogBuilding = sessionCatalogStatus?.state === 'building'
+  const catalogError = sessionCatalogStatus?.state === 'error'
+  const catalogSearchDisabled = Boolean(
+    sessionCatalogStatus && !sessionCatalogStatus.total_exact
+  )
 
   useEffect(() => {
     fetchSessions()
   }, [fetchSessions])
+
+  useEffect(() => {
+    if (!catalogBuilding) return undefined
+    const timer = window.setTimeout(fetchSessions, 2000)
+    return () => window.clearTimeout(timer)
+  }, [catalogBuilding, sessionCatalogStatus?.processed, fetchSessions])
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSessionQuery(searchQuery), 300)
@@ -1101,7 +1113,8 @@ export default function Sidebar() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t('sidebar.searchPlaceholder')}
+                placeholder={catalogSearchDisabled ? t('sidebar.catalogSearchDisabled') : t('sidebar.searchPlaceholder')}
+                disabled={catalogSearchDisabled}
                 style={{
                   flex: 1,
                   background: 'transparent',
@@ -1168,6 +1181,25 @@ export default function Sidebar() {
               <RefreshCw size={13} strokeWidth={1.5} />
             </button>
           </div>
+
+          {(catalogBuilding || catalogError) && (
+            <div
+              className="px-3 py-2"
+              style={{
+                borderLeft: `2px solid ${catalogError ? 'var(--status-error)' : 'var(--status-running)'}`,
+                color: catalogError ? 'var(--red)' : 'var(--text-secondary)',
+                fontSize: 11,
+                lineHeight: 1.5,
+              }}
+            >
+              {catalogError
+                ? t('sidebar.catalogError')
+                : t('sidebar.catalogBuilding', {
+                    processed: sessionCatalogStatus.processed || 0,
+                    discovered: sessionCatalogStatus.discovered || 0,
+                  })}
+            </div>
+          )}
 
           {/* Tag popover host — fixed-position, anchored to the trigger row */}
           {tagPopoverSession && (

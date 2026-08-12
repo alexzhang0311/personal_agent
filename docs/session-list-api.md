@@ -1,18 +1,18 @@
 # Session list discovery API
 
 The WebUI history sidebar uses `GET /api/agent/sessions` to discover sessions.
-The endpoint remains backward compatible: callers that omit the new parameters
-receive all project sessions as before.
+Existing response fields remain compatible. Callers that omit pagination parameters now
+receive the newest 50 project sessions; older records are available through `offset`.
 
 ## Request
 
 ```http
-GET /api/agent/sessions?limit=20&offset=0&kind=chat&q=database
+GET /api/agent/sessions?limit=50&offset=0&kind=chat&q=database
 ```
 
 | Parameter | Values | Default | Meaning |
 | --- | --- | --- | --- |
-| `limit` | `1..200` | `20` | Page size |
+| `limit` | `1..200` | `50` | Page size |
 | `offset` | `0+` | `0` | Offset after filtering |
 | `kind` | `chat`, `scheduler`, `all` | `all` | Session origin |
 | `q` | up to 200 characters | empty | Case-insensitive metadata search |
@@ -39,19 +39,39 @@ are applied before pagination.
     }
   ],
   "total": 1,
-  "limit": 20,
+  "limit": 50,
   "offset": 0,
   "counts": {
     "chat": 0,
     "scheduler": 1,
     "all": 1
+  },
+  "catalog_status": {
+    "state": "ready",
+    "discovered": 1,
+    "processed": 1,
+    "total_exact": true,
+    "last_error": null
   }
 }
 ```
 
-`counts` is calculated after metadata search but before the `kind` filter, so
-clients can render origin tabs for the current query. Existing clients may
-ignore all added fields.
+The process-local catalog inventories filenames and timestamps first, parses at
+most the requested candidate page, then hydrates older metadata in one throttled
+background task. While `catalog_status.total_exact` is false, `total` and
+`counts` are provisional candidate-file counts; clients should hide exact
+counts, disable search, and wait for `ready` before requesting later pages. The
+first page is refreshed as each throttled batch completes. Search requests return `503` until the catalog is
+ready. Existing clients may ignore the additive `catalog_status` field.
+
+When the catalog is ready, `counts` is calculated after metadata search but
+before the `kind` filter. No persistent database or index is used. Restarting
+the API discards only the in-memory catalog and does not alter session JSONL.
+The WebUI calls `GET /api/auth/me?lazy_session_stats=true` during login. This
+opt-in mode consumes only filename, size, and timestamp metadata, so it never
+traverses complete session bodies on the login path; its message count remains
+zero until an exact statistics request is made. The endpoint default remains the
+legacy exact-statistics behavior for existing API callers.
 
 Scheduler origin data is stored separately from Claude session JSONL files.
 Removing this feature or its sidecar does not alter or invalidate conversations.
@@ -114,14 +134,14 @@ Unfiled and their conversation files are not deleted. Duplicate names return
 ### Page sessions in one folder
 
 ```http
-GET /api/agent/session-folders/{folder_id}/sessions?limit=20&offset=0
+GET /api/agent/session-folders/{folder_id}/sessions?limit=50&offset=0
 ```
 
 Use the reserved folder identifier `unfiled` to page chat sessions without a
 folder:
 
 ```http
-GET /api/agent/session-folders/unfiled/sessions?limit=20&offset=0
+GET /api/agent/session-folders/unfiled/sessions?limit=50&offset=0
 ```
 
 The response uses the same `SessionListResponse` envelope as
@@ -146,6 +166,6 @@ Folder definitions and assignments are append-only events in the locked
 lines are ignored. Existing sessions require no migration and default to
 Unfiled. Deleting a session appends an event that clears its assignment.
 
-Folder support does not change `/api/agent/run/stream`, SSE events, WebSocket
-frames, or the existing session rename endpoint. Rolling back the UI and
+Lazy discovery and folder support do not change `/api/agent/run/stream`, SSE event
+envelopes, WebSocket frames, or the existing session rename endpoint. Rolling back the UI and
 ignoring the folder sidecar leaves all conversation data usable.

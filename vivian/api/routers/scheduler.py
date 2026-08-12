@@ -351,7 +351,7 @@ async def get_health(user: UserRecord = Depends(require_user)):
     from ..services.user_store import get_user_store
     store = get_user_store()
     runtime = store.get_runtime_config()
-    retention_days = runtime.get("history_retention_days", 7)
+    retention_days = max(1, int(runtime.get("history_retention_days", 7)))
 
     if not heartbeat_path.exists():
         return SchedulerHealthResponse(healthy=False, running_count=0, history_retention_days=retention_days)

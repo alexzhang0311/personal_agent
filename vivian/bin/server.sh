@@ -103,7 +103,7 @@ print('${default}' if value is None else value)
 HOST=$(read_config server.host 0.0.0.0)
 PORT=$(read_config server.port 8001)
 DEBUG="${DEBUG:-$(read_config server.debug False)}"
-ENABLE_RELOAD="${ENABLE_RELOAD:-auto}"
+ENABLE_RELOAD="${ENABLE_RELOAD:-false}"
 SERVER_LOG=$(read_config logging.server.path logs/server.log)
 APP_LOG=$(read_config logging.app.path logs/app.log)
 ACCESS_LOG=$(read_config logging.access.path logs/access.log)
@@ -707,7 +707,8 @@ do_start() {
     # Build uvicorn command
     local cmd="${PYTHON_BIN} -m uvicorn ${API_APP} --host ${HOST} --port ${PORT} --workers ${WORKERS} --no-access-log"
 
-    # Auto-enable reload in debug mode unless explicitly disabled.
+    # Reload is opt-in. `auto` remains available for development, but production
+    # starts must not inherit reload merely from a preserved debug setting.
     local use_reload="false"
     if [ "${ENABLE_RELOAD}" = "true" ]; then
         use_reload="true"
@@ -987,7 +988,7 @@ show_usage() {
     echo "Environment Variables:"
     echo "  WORKERS  - Number of worker processes (default: 1)"
     echo "  DEBUG    - Override debug mode from config"
-    echo "  ENABLE_RELOAD - Control uvicorn reload: true, false, or auto (default)"
+    echo "  ENABLE_RELOAD - Control uvicorn reload: true, false, or auto (default: false)"
     echo "  VIVIAN_HOME   - Parent dir for state files. Resolved dir is \$VIVIAN_HOME/vivian/ (default: ~/.config)"
     echo "  PROMETHEUS_MULTIPROC_DIR - Prometheus multiprocess dir (auto: \$VIVIAN_HOME/vivian/.prometheus-multiproc, wiped each boot)"
     echo ""

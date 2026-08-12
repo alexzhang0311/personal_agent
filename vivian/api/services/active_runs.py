@@ -33,6 +33,7 @@ class ActiveRun:
     queue_out: list[asyncio.Queue | None] = field(default_factory=lambda: [None])
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task | None = None
+    workspace: str | None = None
 
     def public_state(self) -> dict[str, Any]:
         return {
@@ -94,6 +95,7 @@ class ActiveRunManager:
             owner_username=owner_username,
             first_prompt=prompt,
             session_id=session_id,
+            workspace=kwargs.get("cwd"),
         )
         self._runs[run.run_id] = run
         AGENT_RUNS_STARTED.inc()
@@ -158,6 +160,14 @@ class ActiveRunManager:
                 run.session_id = nested["session_id"]
         elif event == "result" and data.get("session_id"):
             run.session_id = data["session_id"]
+
+        if event == "result" and run.workspace:
+            # Keep the SSE event path fast. The next session-list request will
+            # rebuild its lightweight inventory and include the just-written
+            # session among the bounded foreground candidates.
+            from .session_catalog import get_session_catalog
+
+            get_session_catalog().invalidate(run.workspace)
 
         if event == "permission_request":
             request_id = data.get("request_id")
