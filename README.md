@@ -582,7 +582,7 @@ bin/server.sh status
 | `PYTHON_BIN` | 自动探测 | 指定 Python 解释器 |
 | `WORKERS` | `1` | uvicorn worker 数 |
 | `DEBUG` | `api/config.yaml` | 覆盖 debug 配置 |
-| `ENABLE_RELOAD` | `auto` | 是否启用 uvicorn reload，生产建议 `false` |
+| `ENABLE_RELOAD` | `false` | 是否启用 uvicorn reload；开发环境可显式设为 `true` 或 `auto` |
 | `VIVIAN_HOME` | `$HOME/.config` | Vivian 运行时状态目录 |
 
 生产启动示例：

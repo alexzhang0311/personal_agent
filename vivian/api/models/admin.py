@@ -56,11 +56,19 @@ class CliPathUpdate(BaseModel):
 
 
 class HistoryRetentionResponse(BaseModel):
-    history_retention_days: int = 7
+    history_retention_days: int = Field(default=7, ge=1)
 
 
 class HistoryRetentionUpdate(BaseModel):
-    history_retention_days: int = 7
+    history_retention_days: int = Field(default=7, ge=1)
+
+
+class SchedulerSessionRetentionResponse(BaseModel):
+    scheduler_session_retention_days: int = Field(default=7, ge=1)
+
+
+class SchedulerSessionRetentionUpdate(BaseModel):
+    scheduler_session_retention_days: int = Field(default=7, ge=1)
 
 
 class RetryableToolEntry(BaseModel):

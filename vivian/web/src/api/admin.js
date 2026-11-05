@@ -36,6 +36,8 @@ export const updateCliPath = (data) => putJSON('/admin/clipath', data)
 
 export const getHistoryRetention = () => getJSON('/admin/history-retention')
 export const updateHistoryRetention = (data) => putJSON('/admin/history-retention', data)
+export const getSchedulerSessionRetention = () => getJSON('/admin/scheduler-session-retention')
+export const updateSchedulerSessionRetention = (data) => putJSON('/admin/scheduler-session-retention', data)
 
 export const getRetryableTools = () => getJSON('/admin/retryable-tools')
 export const updateRetryableTools = (data) => putJSON('/admin/retryable-tools', data)

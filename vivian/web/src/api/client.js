@@ -28,7 +28,7 @@ function pushApiToast(status, body) {
   } catch { /* toast unavailable */ }
 }
 
-export async function handleAPIResponse(res) {
+export async function handleAPIResponse(res, { silentStatuses = [] } = {}) {
   if (res.status === 401) {
     window.dispatchEvent(new Event('auth:unauthorized'))
     const text = await res.text()
@@ -37,8 +37,12 @@ export async function handleAPIResponse(res) {
   }
   if (!res.ok) {
     const text = await res.text()
-    pushApiToast(res.status, text)
-    throw new Error(`API error ${res.status}: ${text}`)
+    const silent = silentStatuses.includes(res.status)
+    if (!silent) pushApiToast(res.status, text)
+    const error = new Error(`API error ${res.status}: ${text}`)
+    error.status = res.status
+    error.silent = silent
+    throw error
   }
   return res.json()
 }

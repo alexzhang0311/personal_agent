@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,6 +25,7 @@ from ..services.auth import (
 )
 from ..services.audit_log import AuditEntry, get_audit_logger
 from ..services.compute_user_stats import compute_user_stats
+from ..services.session_catalog import get_session_catalog
 from ..services.config import get_settings
 from ..services.user_env import has_user_env, mask_token, read_user_env, write_user_env
 from ..services.user_store import get_user_store, UserRecord
@@ -112,14 +114,25 @@ async def refresh_token(user: UserRecord = Depends(require_user)):
 
 
 @router.get("/me", response_model=UserPublic)
-async def get_me(user: UserRecord = Depends(require_user)):
+async def get_me(
+    user: UserRecord = Depends(require_user),
+    lazy_session_stats: bool = False,
+):
     settings = get_settings()
     public = user_record_to_public(user)
     if user.username in settings.auth.admins:
         public.role = "admin"
     public.workspace = get_user_workspace(user)
 
-    stats_block = compute_user_stats(user.username)
+    if lazy_session_stats:
+        inventory = await get_session_catalog().inventory(
+            public.workspace, build_background=False
+        )
+        stats_block = await asyncio.to_thread(
+            compute_user_stats, user.username, inventory.candidates
+        )
+    else:
+        stats_block = await asyncio.to_thread(compute_user_stats, user.username)
     public.stats = stats_block.stats
     public.heatmap = stats_block.heatmap
     public.model_usage = stats_block.model_usage

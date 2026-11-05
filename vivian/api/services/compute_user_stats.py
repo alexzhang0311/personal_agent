@@ -231,18 +231,17 @@ def _compute_tagline(total_tokens: int) -> str | None:
     return None
 
 
-def compute_user_stats(username: str) -> UserStatsBlock:
-    settings = get_settings()
-    work_dir = Path(os.path.expanduser(settings.server.work_dir))
-    user_workspace = work_dir / username
-
-    # --- Load sessions for this user ---
-    sessions = _user_sessions(user_workspace)
+def compute_user_stats(username: str, sessions: list | None = None) -> UserStatsBlock:
     session_msg_counts: dict[str, int] = {}
-    for s in sessions:
-        path = _session_file_path(s.session_id, user_workspace)
-        if path is not None:
-            session_msg_counts[s.session_id] = _session_count_messages(path)
+    if sessions is None:
+        settings = get_settings()
+        work_dir = Path(os.path.expanduser(settings.server.work_dir))
+        user_workspace = work_dir / username
+        sessions = _user_sessions(user_workspace)
+        for session in sessions:
+            path = _session_file_path(session.session_id, user_workspace)
+            if path is not None:
+                session_msg_counts[session.session_id] = _session_count_messages(path)
 
     # --- Aggregate audit entries ---
     entries = _read_all_audit_entries(username)

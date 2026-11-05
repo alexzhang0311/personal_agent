@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from claude_agent_sdk import list_sessions
 from fastapi import APIRouter, Depends, Query
 
 from ..models.admin import AuditEntryResponse, AuditLogResponse
 from ..services.audit_log import get_audit_logger
 from ..services.auth import require_user
 from ..services.config import get_settings
+from ..services.session_catalog import get_session_catalog
 from ..services.temp_files import list_temp_files
 from ..services.user_store import UserRecord
 
@@ -32,13 +32,13 @@ async def get_user_stats(
 
     if user_workspace.exists():
         try:
-            sessions = list_sessions(directory=str(user_workspace))
-            session_count = len(sessions)
-            for s in sessions:
-                storage_bytes += s.file_size or 0
-                if s.last_modified:
-                    if last_active is None or s.last_modified > last_active:
-                        last_active = s.last_modified
+            inventory = await get_session_catalog().inventory(
+                str(user_workspace), build_background=False
+            )
+            session_count = len(inventory.candidates)
+            storage_bytes = sum(row.size for row in inventory.candidates)
+            if inventory.candidates:
+                last_active = inventory.candidates[0].mtime_ms
         except Exception:
             pass
 
@@ -165,15 +165,24 @@ async def get_user_analytics(
     session_day_counter: Counter[str] = Counter()
     if user_workspace.exists():
         try:
-            sessions = list_sessions(directory=str(user_workspace))
-            for s in sessions:
-                if s.last_modified:
-                    day = s.last_modified.strftime("%Y-%m-%d")
-                    if start_time and s.last_modified < start_time:
-                        continue
-                    if end_time and s.last_modified > end_time:
-                        continue
-                    session_day_counter[day] += 1
+            inventory = await get_session_catalog().inventory(
+                str(user_workspace), build_background=False
+            )
+            comparable_start = (
+                start_time.replace(tzinfo=None)
+                if start_time and start_time.tzinfo else start_time
+            )
+            comparable_end = (
+                end_time.replace(tzinfo=None)
+                if end_time and end_time.tzinfo else end_time
+            )
+            for candidate in inventory.candidates:
+                session_time = _dt.fromtimestamp(candidate.mtime_ms / 1000)
+                if comparable_start and session_time < comparable_start:
+                    continue
+                if comparable_end and session_time > comparable_end:
+                    continue
+                session_day_counter[session_time.strftime("%Y-%m-%d")] += 1
         except Exception:
             pass
     session_activity = [

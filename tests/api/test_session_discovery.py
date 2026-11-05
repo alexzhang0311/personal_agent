@@ -38,6 +38,25 @@ def _session(
     )
 
 
+
+class _FakeCatalog:
+    def __init__(self, sessions):
+        self.sessions = sessions
+
+    async def inventory(self, _cwd):
+        return SimpleNamespace(
+            sessions=self.sessions,
+            candidate_ids=[row.session_id for row in self.sessions],
+            status=SimpleNamespace(
+                state="ready", discovered=len(self.sessions), processed=len(self.sessions),
+                total_exact=True, last_error=None,
+            ),
+        )
+
+    async def snapshot(self, _cwd, **_kwargs):
+        return await self.inventory(_cwd)
+
+
 class SessionOriginStoreTests(unittest.TestCase):
     def test_round_trip_and_delete(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -118,7 +137,7 @@ class SessionListContractTests(unittest.IsolatedAsyncioTestCase):
         }
         with (
             patch("vivian.api.routers.agent.get_user_workspace", return_value="/workspace"),
-            patch("vivian.api.routers.agent.list_sessions", return_value=sessions),
+            patch("vivian.api.routers.agent.get_session_catalog", return_value=_FakeCatalog(sessions)),
             patch("vivian.api.routers.agent.load_session_origins", return_value=origins),
         ):
             response = await list_agent_sessions(
@@ -152,7 +171,7 @@ class SessionListContractTests(unittest.IsolatedAsyncioTestCase):
         }
         with (
             patch("vivian.api.routers.agent.get_user_workspace", return_value="/workspace"),
-            patch("vivian.api.routers.agent.list_sessions", return_value=sessions),
+            patch("vivian.api.routers.agent.get_session_catalog", return_value=_FakeCatalog(sessions)),
             patch("vivian.api.routers.agent.load_session_origins", return_value=origins),
         ):
             response = await list_agent_sessions(
@@ -183,7 +202,7 @@ class SessionListContractTests(unittest.IsolatedAsyncioTestCase):
         }
         with (
             patch("vivian.api.routers.agent.get_user_workspace", return_value="/workspace"),
-            patch("vivian.api.routers.agent.list_sessions", return_value=sessions),
+            patch("vivian.api.routers.agent.get_session_catalog", return_value=_FakeCatalog(sessions)),
             patch("vivian.api.routers.agent.load_session_origins", return_value=origins),
         ):
             response = await list_agent_sessions(

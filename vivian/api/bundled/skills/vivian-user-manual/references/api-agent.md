@@ -176,7 +176,7 @@ ws://<host>/api/agent/ws/run?token=<jwt_token>
 ### 获取会话列表
 
 ```bash
-curl GET "/api/agent/sessions?scope=project&limit=20&offset=0" \
+curl GET "/api/agent/sessions?scope=project&limit=50&offset=0" \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -184,7 +184,7 @@ curl GET "/api/agent/sessions?scope=project&limit=20&offset=0" \
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | scope | string | `project`（项目）或 `global`（全局） |
-| limit | int | 每页数量（默认 20） |
+| limit | int | 每页数量（默认 50） |
 | offset | int | 偏移量 |
 
 **响应**：
@@ -198,9 +198,17 @@ curl GET "/api/agent/sessions?scope=project&limit=20&offset=0" \
       "last_message": "好的，文件已创建"
     }
   ],
-  "total": 42
+  "total": 42,
+  "catalog_status": {
+    "state": "building",
+    "discovered": 43200,
+    "processed": 50,
+    "total_exact": false
+  }
 }
 ```
+
+整理期间 `total/counts` 为候选文件数，搜索暂不可用；`total_exact=true` 后恢复精确计数和搜索。
 
 ### 获取会话消息
 

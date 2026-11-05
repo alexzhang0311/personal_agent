@@ -81,7 +81,7 @@ export async function revokeMyApiKey() {
 }
 
 export async function getMe(token) {
-  const res = await fetch(`${BASE_URL}/auth/me`, {
+  const res = await fetch(`${BASE_URL}/auth/me?lazy_session_stats=true`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) {

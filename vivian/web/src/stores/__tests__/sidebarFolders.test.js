@@ -120,8 +120,8 @@ describe('sidebar session folders', () => {
     await useSidebarStore.getState().fetchFolderSessions('folder-a')
 
     expect(api.fetchFolderSessions.mock.calls).toEqual([
-      ['folder-a', { limit: 20, offset: 0 }],
-      ['folder-a', { limit: 20, offset: 1 }],
+      ['folder-a', { limit: 50, offset: 0 }],
+      ['folder-a', { limit: 50, offset: 1 }],
     ])
     expect(useSidebarStore.getState().folderBuckets['folder-a'].sessions)
       .toHaveLength(2)
@@ -141,10 +141,36 @@ describe('sidebar session folders', () => {
     expect(api.fetchFolders).not.toHaveBeenCalled()
     expect(api.fetchFolderSessions).not.toHaveBeenCalled()
     expect(api.fetchSessions).toHaveBeenNthCalledWith(1, {
-      limit: 20, offset: 0, kind: 'scheduler', q: '',
+      limit: 50, offset: 0, kind: 'scheduler', q: '',
     })
     expect(api.fetchSessions).toHaveBeenNthCalledWith(2, {
-      limit: 20, offset: 0, kind: 'chat', q: 'needle',
+      limit: 50, offset: 0, kind: 'chat', q: 'needle',
+    })
+  })
+
+  it('does not search for the active session while the catalog is building', async () => {
+    window.sessionStorage.setItem('vivian-active-chat', 'session-active')
+    useSidebarStore.setState({ activeSessionId: 'session-active' })
+    const building = {
+      state: 'building', discovered: 100, processed: 50, total_exact: false,
+    }
+    api.fetchFolders.mockResolvedValue({
+      folders: [], unfiled_count: 100, catalog_status: building,
+    })
+    api.fetchFolderSessions.mockResolvedValue({
+      sessions: [], total: 100, catalog_status: building,
+    })
+    api.fetchSessions.mockResolvedValue({
+      sessions: [], total: 100,
+      counts: { chat: 100, scheduler: 0, all: 100 },
+      catalog_status: building,
+    })
+
+    await useSidebarStore.getState().fetchSessions()
+
+    expect(api.fetchSessions).toHaveBeenCalledTimes(1)
+    expect(api.fetchSessions).toHaveBeenCalledWith({
+      limit: 1, offset: 0, kind: 'chat',
     })
   })
 

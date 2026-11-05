@@ -461,7 +461,7 @@ bin/server.sh status
 |------|--------|------|
 | \`WORKERS\` | 1 | uvicorn 工作进程数 |
 | \`DEBUG\` | config.yaml | 覆盖调试模式 |
-| \`ENABLE_RELOAD\` | auto | 热重载：true / false / auto |
+| \`ENABLE_RELOAD\` | false | 热重载：true / false / auto（开发环境显式开启） |
 
 示例：
 

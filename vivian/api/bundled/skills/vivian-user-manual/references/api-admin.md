@@ -207,6 +207,17 @@ curl -X PUT /api/admin/presetprompt \
 
 ---
 
+## 历史保留
+
+- `GET/PUT /api/admin/history-retention`：设置调度器运行摘要及运行输出保留天数，最少 1 天。
+- `GET/PUT /api/admin/scheduler-session-retention`：设置 Scheduler 产生的 Claude 完整会话保留天数，最少 1 天，默认 7 天。到期会话隔离 24 小时后永久删除，普通聊天不会自动清理。
+
+```json
+{ "scheduler_session_retention_days": 7 }
+```
+
+---
+
 ## 常见错误
 
 | 状态码 | 说明 | 解决方法 |

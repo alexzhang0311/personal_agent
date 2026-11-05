@@ -308,7 +308,8 @@ JWT 令牌通过登录接口获取，API Key 在设置页面生成。公开端�
 | | GET | /api/admin/users/{username}/mcp | 查看用户 MCP |
 | | GET/PUT | /api/admin/presetprompt | 系统提示词 |
 | | GET/PUT | /api/admin/clipath | CLI 路径 |
-| | GET/PUT | /api/admin/history-retention | 历史保留 |
+| | GET/PUT | /api/admin/history-retention | 运行历史保留 |
+| | GET/PUT | /api/admin/scheduler-session-retention | 定时任务完整会话保留 |
 | | GET/PUT | /api/admin/retryable-tools | 工具重试 |
 | | GET/PUT | /api/admin/system/plugin/{id} | 插件管理 |
 | | GET | /api/admin/files/list | 管理员文件浏览 |

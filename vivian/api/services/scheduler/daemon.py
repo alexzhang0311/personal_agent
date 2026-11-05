@@ -36,6 +36,7 @@ from api.services.audit_log import AuditEntry, get_audit_logger
 from api.services.config import get_settings
 from api.services.scheduler.job_store import JobStore
 from api.services.scheduler.run_history import RunHistoryStore
+from api.services.scheduler.session_retention import SchedulerSessionRetention
 from api.services.session_origins import record_scheduler_session, session_id_from_event
 from api.services.scheduler.shared import (
     build_trigger,
@@ -71,6 +72,7 @@ class SchedulerDaemon:
         self._job_locks: dict[str, asyncio.Lock] = {}
         self._job_store = JobStore()
         self._run_history = RunHistoryStore()
+        self._session_retention = SchedulerSessionRetention()
         self._shutdown_requested = False
 
     async def start(self) -> None:
@@ -440,23 +442,40 @@ class SchedulerDaemon:
         try:
             store = get_user_store()
             runtime = store.get_runtime_config()
-            return runtime.get("history_retention_days", 7)
+            return max(1, int(runtime.get("history_retention_days", 7)))
+        except Exception:
+            return 7
+
+    def _get_session_retention_days(self) -> int:
+        try:
+            runtime = get_user_store().get_runtime_config()
+            return max(1, int(runtime.get("scheduler_session_retention_days", 7)))
         except Exception:
             return 7
 
     async def _run_initial_cleanup(self) -> None:
         retention_days = self._get_retention_days()
-        if retention_days <= 0:
-            return
         logger.info("Running initial history cleanup (retention={}d)", retention_days)
-        await asyncio.to_thread(self._run_history.purge_all_users, retention_days)
+        if retention_days > 0:
+            await asyncio.to_thread(self._run_history.purge_all_users, retention_days)
+        session_days = self._get_session_retention_days()
+        active_ids = {run.run_id for run in self._active_runs.values()}
+        result = await asyncio.to_thread(
+            self._session_retention.purge_all_users, session_days, active_ids
+        )
+        logger.info("Scheduler session cleanup result: {}", result)
 
     async def _daily_cleanup(self) -> None:
         retention_days = self._get_retention_days()
-        if retention_days <= 0:
-            return
         logger.info("Running daily history cleanup (retention={}d)", retention_days)
-        await asyncio.to_thread(self._run_history.purge_all_users, retention_days)
+        if retention_days > 0:
+            await asyncio.to_thread(self._run_history.purge_all_users, retention_days)
+        session_days = self._get_session_retention_days()
+        active_ids = {run.run_id for run in self._active_runs.values()}
+        result = await asyncio.to_thread(
+            self._session_retention.purge_all_users, session_days, active_ids
+        )
+        logger.info("Scheduler session cleanup result: {}", result)
 
     # --- Command processing ---
 
