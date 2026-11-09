@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-09
+
 ### Added
 
 - 新增 `POST /api/agent/vivian` 接口：按 `username` 路由会话的同步 Agent 执行。`username` 须为已存在账号，服务端维护 username → session 绑定（无则自动新建、有则复用）；消息含 `/reset` 标记时强制新建会话；响应对外返回 `session_id`。该接口仅允许白名单内的 API Key 调用。发送给模型的消息默认拼接 `我是{username}` 前缀（纯 `/reset` 消息除外）；新会话自动归档到与 `username` 同名的侧栏文件夹下（不存在则自动创建）。
