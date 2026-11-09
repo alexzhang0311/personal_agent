@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -42,6 +43,8 @@ from ..models.agent import (
     SessionMessageResponse,
     SessionMessagesResponse,
     TagRequest,
+    VivianAgentRunRequest,
+    VivianAgentRunResponse,
     WsClientFrame,
     WsInitFrame,
     WsPermissionFrame,
@@ -68,6 +71,8 @@ from ..services.session_folders import (
     rename_session_folder,
 )
 from ..services.session_origins import delete_session_origin, load_session_origins
+from ..services.user_store import get_user_store
+from ..services.vivian_agent_bindings import get_binding, set_binding
 from ..services.user_store import UserRecord
 from ..metrics import AGENT_RUNS_FINISHED, AGENT_RUNS_STARTED
 
@@ -362,6 +367,141 @@ async def run_agent(
     finally:
         AGENT_RUNS_FINISHED.labels(outcome=outcome).inc()
     return AgentRunResponse(**result)
+
+
+# --- POST /api/agent/vivian -------------------------------------------------
+#
+# Username-keyed session routing for machine-to-machine callers.
+# - Bearer token must be an API key listed in the admin "api_key_whitelist"
+#   runtime config (deny-by-default; JWT callers always get 403 — UI users
+#   have /api/agent/run).
+# - `username` is an external business identifier: it must match an existing
+#   account, and the server keeps a username → session binding so follow-up
+#   requests continue the same conversation.
+# - A standalone `/reset` token in the message forces a new session.
+
+_RESET_TOKEN_RE = re.compile(r"(?<![\w/])/reset(?![\w/])")
+_RESET_FALLBACK_PROMPT = "Reset complete. New session started."
+
+
+def _archive_to_user_folder(cwd: str, username: str, session_id: str) -> None:
+    """File ``session_id`` into a folder named after the business ``username``,
+    creating the folder if missing. Best-effort: folder errors are logged and
+    never fail the API call — the agent result already succeeded."""
+    try:
+        state = load_session_folders(cwd)
+        record = next(
+            (f for f in state.folders.values() if f.name.casefold() == username.casefold()),
+            None,
+        )
+        if record is None:
+            try:
+                record = create_session_folder(cwd, username)
+            except SessionFolderConflictError:
+                # Lost a create race — reload and reuse the winner's folder
+                state = load_session_folders(cwd)
+                record = next(
+                    (f for f in state.folders.values() if f.name.casefold() == username.casefold()),
+                    None,
+                )
+        if record is not None:
+            move_session_to_folder(cwd, session_id, record.folder_id)
+    except Exception:
+        logger.exception(
+            "Failed to archive session %s to folder %s", session_id, username
+        )
+
+
+def _extract_bearer_token(http_request: Request) -> str:
+    header = http_request.headers.get("authorization") or ""
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer":
+        return ""
+    return token.strip()
+
+
+def _check_api_key_whitelist(http_request: Request) -> None:
+    auth_method = getattr(http_request.state, "auth_method", "jwt")
+    config = get_user_store().get_runtime_config().get("api_key_whitelist") or {}
+    if not isinstance(config, dict):
+        config = {}
+    keys = config.get("keys")
+    keys = [k for k in keys if isinstance(k, str)] if isinstance(keys, list) else []
+    token = _extract_bearer_token(http_request)
+    if (
+        not config.get("enable")
+        or auth_method != "api_key"
+        or not token
+        or token not in keys
+    ):
+        raise HTTPException(403, "API key not authorized for this endpoint")
+
+
+@router.post("/vivian", response_model=VivianAgentRunResponse)
+async def run_vivian_agent(
+    http_request: Request,
+    request: VivianAgentRunRequest,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    _check_api_key_whitelist(http_request)
+
+    store = get_user_store()
+    if store.get_user(request.username) is None:
+        raise HTTPException(404, "user not exist")
+
+    cwd = get_user_workspace(user)
+    caller_username = user.username if user else None
+    attachments = _validate_attachments(request.attachments, cwd)
+    images = _validate_images(request.images)
+    auth_method = getattr(http_request.state, "auth_method", "jwt")
+
+    is_reset = _RESET_TOKEN_RE.search(request.message) is not None
+    message = _RESET_TOKEN_RE.sub("", request.message).strip() if is_reset else request.message
+    # Identity prefix: every message carries "我是{username}" so the model
+    # knows who it is talking to. A pure /reset (fallback prompt only) is
+    # the sole exception.
+    prefix_applies = not (is_reset and not message)
+    if is_reset and not message:
+        message = _RESET_FALLBACK_PROMPT
+    if prefix_applies:
+        message = f"我是{request.username}。{message}"
+
+    # Resolve the session to continue: /reset forces a new one; otherwise
+    # reuse the binding — unless its JSONL is gone from disk, in which case
+    # we transparently start a new session.
+    session_id = None if is_reset else get_binding(cwd, request.username)
+    if session_id and not _session_jsonl_path(cwd, session_id).exists():
+        session_id = None
+
+    AGENT_RUNS_STARTED.inc()
+    outcome = "success"
+    try:
+        result = await agent_run(
+            message, session_id, request.permission_mode,
+            cwd=cwd, username=caller_username, model_override=request.model,
+            auth_method=auth_method,
+            attachments=attachments, images=images, mcp_servers=request.mcp_servers,
+            enable_file_checkpointing=request.enable_file_checkpointing,
+            fork_session=request.fork_session,
+        )
+    except asyncio.CancelledError:
+        outcome = "cancelled"
+        raise
+    except Exception:
+        outcome = "error"
+        raise
+    finally:
+        AGENT_RUNS_FINISHED.labels(outcome=outcome).inc()
+
+    # Persist the binding whenever the run produced a session id — even on
+    # is_error runs the CLI session exists on disk and stays resumable; if
+    # no session id came back (e.g. retries exhausted), keep the old binding.
+    new_session_id = result.get("session_id")
+    if isinstance(new_session_id, str) and new_session_id:
+        set_binding(cwd, request.username, new_session_id)
+        _archive_to_user_folder(cwd, request.username, new_session_id)
+
+    return VivianAgentRunResponse(**result, username=request.username, reset=is_reset)
 
 
 @router.post("/run/stream")

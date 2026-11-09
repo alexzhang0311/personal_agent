@@ -171,6 +171,8 @@ class UserStore:
         #                            patterns forcing user approval in
         #                            bypassPermissions mode.
         #   pii_masking            : dict {enable, patterns}
+        #   api_key_whitelist      : dict {enable, keys} -- bearer tokens
+        #                            allowed to call POST /api/agent/vivian.
         # Passing value=None removes the key.
         with self._lock:
             data = self._load()

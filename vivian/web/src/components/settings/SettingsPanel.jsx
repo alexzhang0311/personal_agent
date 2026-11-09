@@ -10,11 +10,13 @@ import {
   getSchedulerSessionRetention,
   getRetryableTools,
   getSensitivePatterns,
+  getApiKeyWhitelist,
   updateCliPath,
   updateHistoryRetention,
   updateSchedulerSessionRetention,
   updateRetryableTools,
   updateSensitivePatterns,
+  updateApiKeyWhitelist,
 } from '../../api/admin'
 import { copyTextToClipboard } from '../../utils/clipboard'
 import { getLucideIcon, ICON_NAMES } from '../../utils/lucideIconMap'
@@ -1435,6 +1437,222 @@ function AdvancedTab() {
       >
         {t('settings.transportNote')}
       </p>
+      <ApiKeyWhitelistSection />
+    </div>
+  )
+}
+
+
+function ApiKeyWhitelistSection() {
+  const { t } = useTranslation()
+  const authUser = useAuthStore((s) => s.user)
+  const isAdmin = authUser?.role === 'admin'
+  const [enable, setEnable] = useState(false)
+  const [keys, setKeys] = useState([])
+  const [newKey, setNewKey] = useState('')
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState(null)
+
+  const inputStyle = {
+    background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+    borderRadius: 4, padding: '6px 10px', color: 'var(--text-primary)',
+    fontSize: 12, width: '100%', boxSizing: 'border-box',
+    transition: 'border-color 150ms ease',
+  }
+
+  useEffect(() => {
+    if (!isAdmin) return
+    let cancelled = false
+    getApiKeyWhitelist().then((data) => {
+      if (!cancelled) {
+        setEnable(Boolean(data?.enable))
+        setKeys(Array.isArray(data?.keys) ? data.keys : [])
+        setLoaded(true)
+      }
+    }).catch(() => { if (!cancelled) setLoaded(true) })
+    return () => { cancelled = true }
+  }, [isAdmin])
+
+  if (!isAdmin) return null
+
+  if (!loaded) {
+    return (
+      <div className="flex flex-col gap-2" style={{ marginTop: 16 }}>
+        <div className="skeleton" style={{ height: 16, width: 200, borderRadius: 2 }} />
+        <div className="skeleton" style={{ height: 36, borderRadius: 2 }} />
+      </div>
+    )
+  }
+
+  const handleAdd = () => {
+    const trimmed = newKey.trim()
+    if (!trimmed) {
+      setError(t('settings.agentApiWhitelistInvalidKey'))
+      return
+    }
+    if (keys.includes(trimmed)) {
+      setError(t('settings.agentApiWhitelistDuplicate'))
+      return
+    }
+    setKeys((prev) => [...prev, trimmed])
+    setNewKey('')
+    setError(null)
+    setDirty(true)
+  }
+
+  const handleDelete = (idx) => {
+    setKeys((prev) => prev.filter((_, i) => i !== idx))
+    setDirty(true)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      await updateApiKeyWhitelist({ enable, keys })
+      setDirty(false)
+    } catch (e) {
+      setError(e?.message || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3" style={{ marginTop: 16 }}>
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+          {t('settings.agentApiWhitelistTitle')}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+          {t('settings.agentApiWhitelistDesc')}
+        </div>
+      </div>
+
+      <label
+        className="flex items-center gap-2"
+        style={{
+          fontSize: 12,
+          color: 'var(--text-primary)',
+          cursor: 'pointer',
+          padding: '8px 10px',
+          background: 'var(--bg-elevated)',
+          border: '1px solid var(--border)',
+          borderLeft: enable ? '2px solid var(--cyan)' : '1px solid var(--border)',
+          borderRadius: 2,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={enable}
+          onChange={(e) => { setEnable(e.target.checked); setDirty(true) }}
+          style={{ accentColor: 'var(--cyan)', cursor: 'pointer' }}
+        />
+        <span style={{ fontWeight: 600 }}>{t('settings.agentApiWhitelistEnable')}</span>
+      </label>
+
+      <div className="flex items-center gap-2">
+        <input
+          className="flex-1"
+          style={{ ...inputStyle, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace", minWidth: 0 }}
+          value={newKey}
+          onChange={(e) => setNewKey(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleAdd() }}
+          placeholder={t('settings.agentApiWhitelistAddKey')}
+          onFocus={(e) => { e.target.style.borderColor = 'var(--border-strong)' }}
+          onBlur={(e) => { e.target.style.borderColor = 'var(--border)' }}
+        />
+        <button
+          className="flex items-center gap-1 px-3 py-2"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+            color: 'var(--text-primary)',
+            cursor: 'pointer',
+            fontSize: 12,
+            flexShrink: 0,
+          }}
+          onClick={handleAdd}
+        >
+          <Plus size={14} strokeWidth={1.5} />
+          {t('settings.agentApiWhitelistAdd')}
+        </button>
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--red)' }}>
+          <AlertCircle size={12} strokeWidth={1.5} />
+          {error}
+        </div>
+      )}
+
+      {keys.length === 0 ? (
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', padding: '8px 10px', border: '1px dashed var(--border)', borderRadius: 2 }}>
+          {t('settings.agentApiWhitelistEmpty')}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {keys.map((key, idx) => (
+            <div key={`${key}-${idx}`} className="flex items-center gap-2">
+              <div
+                className="flex-1 flex items-center"
+                style={{
+                  fontSize: 12,
+                  fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 2,
+                  padding: '6px 10px',
+                  color: 'var(--text-primary)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  minWidth: 0,
+                }}
+              >
+                {key}
+              </div>
+              <button
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-dim)',
+                  cursor: 'pointer',
+                  padding: 4,
+                  flexShrink: 0,
+                  display: 'inline-flex',
+                }}
+                title={t('common.delete')}
+                onClick={() => handleDelete(idx)}
+              >
+                <Trash2 size={14} strokeWidth={1.5} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <button
+          disabled={!dirty || saving}
+          style={{
+            background: dirty && !saving ? 'var(--blue)' : 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+            color: dirty && !saving ? 'var(--text-inverse)' : 'var(--text-dim)',
+            cursor: dirty && !saving ? 'pointer' : 'default',
+            fontSize: 12,
+            fontWeight: 600,
+            padding: '6px 16px',
+          }}
+          onClick={handleSave}
+        >
+          {t('settings.agentApiWhitelistSave')}
+        </button>
+      </div>
     </div>
   )
 }

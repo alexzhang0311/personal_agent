@@ -237,6 +237,23 @@ class AgentRunResponse(BaseModel):
     api_error_status: int | None = None
 
 
+class VivianAgentRunRequest(AgentRunRequest):
+    """Request for POST /api/agent/vivian.
+
+    Sessions are routed server-side by the ``username`` binding; the
+    inherited ``session_id`` field is accepted but IGNORED on input.
+    """
+
+    username: str = Field(min_length=1, max_length=64)
+
+
+class VivianAgentRunResponse(AgentRunResponse):
+    """Response for POST /api/agent/vivian."""
+
+    username: str = ""
+    reset: bool = False
+
+
 # WebSocket frame models
 
 class WsInitFrame(BaseModel):

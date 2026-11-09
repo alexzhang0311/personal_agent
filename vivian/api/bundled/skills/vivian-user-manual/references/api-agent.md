@@ -10,6 +10,7 @@
 |------|------|------|
 | POST | /api/agent/run | 同步执行 Agent（等待完成后返回） |
 | POST | /api/agent/run/stream | 流式执行 Agent（SSE 实时推送） |
+| POST | /api/agent/vivian | 按 username 路由会话的同步执行（API Key 白名单受限） |
 | WS | /api/agent/ws/run | WebSocket 实时对话（推荐） |
 | GET | /api/agent/sessions | 获取会话列表 |
 | GET | /api/agent/sessions/{session_id}/messages | 获取会话历史消息 |
@@ -69,6 +70,55 @@ curl -X POST /api/agent/run \
   "stop_reason": "end_turn"
 }
 ```
+
+---
+
+## Vivian 接口（按 username 路由会话）
+
+`POST /api/agent/vivian` 是面向外部系统集成（机器对机器）的同步接口，
+通过 `username` 参数进行会话路由：
+
+- 请求必须使用 **API Key**（Bearer Token）鉴权，且该 Key 必须在管理员
+  配置的白名单中（Settings → 高级 → Agent API 密钥白名单）。白名单未
+  开启或 Key 不匹配时返回 **403**。
+- `username` 必须是系统中已存在的账号，否则返回 **404 "user not exist"**。
+- 服务端维护 username → session 的绑定：有绑定则复用会话（续接上下文），
+  没有则自动新建会话，并在响应中返回 `session_id`。
+- 消息中包含独立的 `/reset` 标记（前后不能是字母/数字/斜杠）时，强制
+  新建会话，后续该 username 的请求使用新会话；`/reset` 标记本身不会
+  发送给模型。
+- 发送给模型的消息默认拼接 `我是{username}` 前缀（同一条消息，模型
+  每轮可见），纯 `/reset` 消息除外。
+- 新建的会话自动归档到与 `username` 同名的侧栏文件夹下（不存在则
+  自动创建），登录用户可在会话侧栏按文件夹查看不同 username 的会话。
+- 请求体中的 `session_id` 字段会被忽略（服务端绑定是唯一路由依据）。
+
+```bash
+curl -X POST /api/agent/vivian \
+  -H "Authorization: Bearer <whitelisted-api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "target-user",
+    "message": "帮我写一个 Python Hello World"
+  }'
+```
+
+### 响应
+
+```json
+{
+  "username": "target-user",
+  "reset": false,
+  "session_id": "abc123",
+  "is_error": false,
+  "num_turns": 1,
+  "result": "..."
+}
+```
+
+> 说明：`username` 只是会话路由的业务标识，Agent 实际运行在 API Key
+> 所属用户的工作区中。使用全局 API Key 时，可通过 `x-user-name` 头
+> 指定目标工作区。
 
 ---
 

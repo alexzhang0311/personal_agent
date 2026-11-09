@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..models.admin import (
     AdminStatsResponse,
+    ApiKeyWhitelistResponse,
+    ApiKeyWhitelistUpdate,
     AuditEntryResponse,
     AuditLogResponse,
     CliPathResponse,
@@ -732,6 +734,60 @@ async def update_sensitive_patterns(
         enable=bool(request.enable),
         patterns=list(request.patterns),
     )
+
+
+_MAX_WHITELIST_KEYS = 100
+
+
+@router.get("/apikey-whitelist", response_model=ApiKeyWhitelistResponse)
+async def get_api_key_whitelist():
+    """Return the API-key whitelist for POST /api/agent/vivian."""
+    store = get_user_store()
+    cfg = store.get_runtime_config().get("api_key_whitelist") or {}
+    raw = cfg.get("keys") or []
+    keys = [k for k in raw if isinstance(k, str)]
+    return ApiKeyWhitelistResponse(enable=bool(cfg.get("enable", False)), keys=keys)
+
+
+@router.put("/apikey-whitelist", response_model=ApiKeyWhitelistResponse)
+async def update_api_key_whitelist(
+    request: ApiKeyWhitelistUpdate,
+    current_user: UserRecord = Depends(require_admin),
+):
+    """Update the API-key whitelist for POST /api/agent/vivian.
+
+    Only bearer tokens exactly matching a listed key may call that
+    endpoint, and only when ``enable`` is on. Key values are never
+    written to the audit log."""
+    cleaned: list[str] = []
+    for raw in request.keys:
+        key = raw.strip()
+        if not key:
+            raise HTTPException(422, "API key entries cannot be empty")
+        if len(key) > 4096:
+            raise HTTPException(422, "API key entries cannot exceed 4096 characters")
+        if key not in cleaned:
+            cleaned.append(key)
+    if len(cleaned) > _MAX_WHITELIST_KEYS:
+        raise HTTPException(
+            422, f"API key whitelist cannot exceed {_MAX_WHITELIST_KEYS} entries"
+        )
+
+    store = get_user_store()
+    store.update_runtime_config(
+        "api_key_whitelist",
+        {"enable": bool(request.enable), "keys": cleaned},
+    )
+
+    audit = get_audit_logger()
+    audit.append(AuditEntry(
+        actor=current_user.username,
+        action="runtime.api_key_whitelist_updated",
+        target="api_key_whitelist",
+        # Never log key values — only the shape of the change.
+        details={"enable": bool(request.enable), "key_count": len(cleaned)},
+    ))
+    return ApiKeyWhitelistResponse(enable=bool(request.enable), keys=cleaned)
 
 
 # --- Plugin management endpoints ---

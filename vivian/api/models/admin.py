@@ -119,3 +119,13 @@ class SensitivePatternsResponse(BaseModel):
 class SensitivePatternsUpdate(BaseModel):
     enable: bool = False
     patterns: list[SensitivePatternEntry] = []
+
+
+class ApiKeyWhitelistResponse(BaseModel):
+    enable: bool = False
+    keys: list[str] = []
+
+
+class ApiKeyWhitelistUpdate(BaseModel):
+    enable: bool = False
+    keys: list[str] = []

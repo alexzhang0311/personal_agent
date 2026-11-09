@@ -48,6 +48,9 @@ export const updateRiskyTools = (data) => putJSON('/admin/risky-tools', data)
 export const getSensitivePatterns = () => getJSON('/admin/sensitive-patterns')
 export const updateSensitivePatterns = (data) => putJSON('/admin/sensitive-patterns', data)
 
+export const getApiKeyWhitelist = () => getJSON('/admin/apikey-whitelist')
+export const updateApiKeyWhitelist = (data) => putJSON('/admin/apikey-whitelist', data)
+
 export const getPlugins = () => getJSON('/admin/system/plugin')
 export const updatePlugin = (id, data) => putJSON(`/admin/system/plugin/${encodeURIComponent(id)}`, data)
 
